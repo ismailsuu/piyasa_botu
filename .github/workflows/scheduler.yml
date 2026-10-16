@@ -1,0 +1,31 @@
+name: Otomatik Piyasa Bildirimi
+
+on:
+  schedule:
+    # TSİ (UTC+3):
+    # 09:00 TSİ -> 06:00 UTC
+    # 14:00 TSİ -> 11:00 UTC
+    # 19:00 TSİ -> 16:00 UTC
+    - cron: '0 6,11,16 * * *'
+  workflow_dispatch:
+
+jobs:
+  market-job:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Depoyu Al
+        uses: actions/checkout@v4
+
+      - name: Python Hazırla
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Paketleri Yükle
+        run: pip install -r requirements.txt
+
+      - name: Raporu Çalıştır ve Gönder
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python bot.py
