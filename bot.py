@@ -44,7 +44,7 @@ def get_market_summary():
 
 def send_telegram(message_text):
     bot_token = "8609292057:AAEzjrPio_7af5lZWnwBI4fY6YX-16oB4mE"
-    chat_id = "8839556596"
+    chat_id = "-5347011483"
     
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
     payload = {
