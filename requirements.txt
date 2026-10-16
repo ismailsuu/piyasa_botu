@@ -1,2 +1,5 @@
 yfinance
 requests
+streamlit
+plotly
+pandas
