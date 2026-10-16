@@ -12,8 +12,7 @@ TICKERS = {
     "Pamuk (#2)": "CT=F",
     "USD/TRY": "USDTRY=X",
     "ABD 10Y Tahvil": "^TNX",
-    "USD/CNY": "CNY=X",
-    "Almanya 10Y Tahvil": "^TNX"  # Alternatif genel gösterge
+    "USD/CNY": "CNY=X"
 }
 
 def get_market_summary():
@@ -33,13 +32,14 @@ def get_market_summary():
                     lines.append(f"• {label}: {last_price}")
             else:
                 lines.append(f"• {label}: Veri yok")
-        except Exception as e:
+        except Exception:
             lines.append(f"• {label}: Alınamadı")
     return "\n".join(lines)
 
 def send_telegram(message_text):
-    bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
-    chat_id = os.environ.get("TELEGRAM_CHAT_ID")
+    # Doğrudan token ve ID tanımlandı
+    bot_token = "8609292057:AAEcdx0-5Zs5QRSW7WAYEFDNlKyx6GXQrwI"
+    chat_id = "8839556596"
     
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
     payload = {
