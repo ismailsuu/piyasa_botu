@@ -37,8 +37,8 @@ def get_market_summary():
     return "\n".join(lines)
 
 def send_telegram(message_text):
-    # Doğrudan token ve ID tanımlandı
-    bot_token = "8609292057:AAEcdx0-5Zs5QRSW7WAYEFDNlKyx6GXQrwI"
+    # Yeni ve temiz token
+    bot_token = "8609292057:AAEzjrPio_7af5lZWnwBI4fY6YX-16oB4mE"
     chat_id = "8839556596"
     
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
