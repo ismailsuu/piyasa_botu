@@ -15,6 +15,9 @@ TICKERS = {
     "USD/CNY": "CNY=X"
 }
 
+# Özel Streamlit panel adresiniz
+DASHBOARD_URL = "https://ismail-piyasa.streamlit.app/"
+
 def get_market_summary():
     lines = ["📊 Piyasa Özeti (Canlı)\n"]
     for label, symbol in TICKERS.items():
@@ -34,10 +37,12 @@ def get_market_summary():
                 lines.append(f"• {label}: Veri yok")
         except Exception:
             lines.append(f"• {label}: Alınamadı")
+            
+    # Mesajın altına tıklanabilir panel linki ekleme
+    lines.append(f"\n📈 Detaylı Grafikler ve 10 Yıllık Panel:\n{DASHBOARD_URL}")
     return "\n".join(lines)
 
 def send_telegram(message_text):
-    # Yeni ve temiz token
     bot_token = "8609292057:AAEzjrPio_7af5lZWnwBI4fY6YX-16oB4mE"
     chat_id = "8839556596"
     
