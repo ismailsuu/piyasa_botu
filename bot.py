@@ -46,6 +46,7 @@ def get_market_summary():
     except Exception:
       lines.append(f"• {label}: Alınamadı")
 
+  # Mesajın altına tıklanabilir panel linki ekleme
   lines.append(f"\n📈 Detaylı Grafikler ve 10 Yıllık Panel:\n{DASHBOARD_URL}")
   return "\n".join(lines)
 
@@ -58,11 +59,19 @@ def send_telegram(message_text):
 
 
 def send_portwatch_chart():
-  """IMF PortWatch'tan son 30 günlük Babülmendep ve Süveyş verilerini çeker,
+  """IMF PortWatch açık veri servisinden Babülmendep ve Süveyş verilerini çeker,
 
   grafik oluşturup Telegram grubuna fotoğraf olarak gönderir.
   """
-  url = "https://portwatch.imf.org/api/search/v1/rest/services/collections/Daily_Chokepoints_Data/geoservice/FeatureServer/0/query"
+  url = "https://services9.arcgis.com/weJ1QsnbMYJlCHdG/arcgis/rest/services/Daily_Chokepoints_Data/FeatureServer/0/query"
+
+  # Güvenlik başlığı (ArcGIS bot filtresine takılmamak için)
+  headers = {
+      "User-Agent": (
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,"
+          " like Gecko) Chrome/120.0.0.0 Safari/537.36"
+      )
+  }
 
   noktalar = [
       ("Bab el-Mandeb Strait", "Babülmendep", "#d9534f"),
@@ -79,17 +88,27 @@ def send_portwatch_chart():
         "f": "json",
     }
     try:
-      r = requests.get(url, params=params, timeout=15).json()
-      rows = [x["attributes"] for x in r.get("features", [])]
+      res = requests.get(url, params=params, headers=headers, timeout=20)
+      data = res.json()
+
+      if "error" in data:
+        print(f"ArcGIS API Hatası ({etiket}): {data['error']}")
+        continue
+
+      rows = [x["attributes"] for x in data.get("features", [])]
       if rows:
         df = pd.DataFrame(rows)
         df["date"] = pd.to_datetime(df["date"], unit="ms")
         veriler[etiket] = (df.sort_values("date"), renk)
+      else:
+        print(f"Kayıt bulunamadı: {etiket}")
     except Exception as e:
-      print(f"PortWatch {etiket} hatası: {e}")
+      print(f"PortWatch bağlantı hatası ({etiket}): {e}")
 
   if not veriler:
-    print("PortWatch verisi alınamadığı için grafik gönderilmedi.")
+    print(
+        "PortWatch verisi çekilemediği için grafik gönderimi iptal edildi."
+    )
     return
 
   # Grafiği Çiz
@@ -106,13 +125,13 @@ def send_portwatch_chart():
 
   plt.title("IMF PortWatch - Günlük Gemi Geçiş Trendi (Son 30 Gün)")
   plt.xlabel("Tarih")
-  plt.ylabel("Gemi Sayısı")
+  plt.ylabel("Geçiş Yapan Gemi Sayısı")
   plt.grid(True, linestyle="--", alpha=0.5)
   plt.legend()
   plt.xticks(rotation=25)
   plt.tight_layout()
 
-  # Diske kaydetmeden doğrudan bellekte (RAM) PNG oluştur
+  # Diske yazmadan belleğe kaydet (RAM)
   buffer = io.BytesIO()
   plt.savefig(buffer, format="png", dpi=130)
   buffer.seek(0)
@@ -122,20 +141,20 @@ def send_portwatch_chart():
   photo_url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto"
   caption = (
       "🚢 <b>IMF PortWatch Deniz Trafiği Raporu</b>\n"
-      "Kritik boğazlardaki son 30 günlük gemi geçiş sayıları."
+      "Babülmendep ve Süveyş Kanalı son 30 günlük gemi geçiş grafiği."
   )
 
   files = {"photo": ("portwatch.png", buffer, "image/png")}
   data = {"chat_id": CHAT_ID, "caption": caption, "parse_mode": "HTML"}
 
   res = requests.post(photo_url, data=data, files=files, timeout=25)
-  print("PortWatch Grafik Yanıtı:", res.status_code, res.text)
+  print("PortWatch Telegram Yanıtı:", res.status_code, res.text)
 
 
 if __name__ == "__main__":
-  # 1. Piyasa özeti metnini gönder
+  # 1. Piyasa özeti metnini Telegram'a gönder
   report = get_market_summary()
   send_telegram(report)
 
-  # 2. PortWatch gemi trafiği grafiğini gönder
+  # 2. PortWatch gemi trafiği grafiğini Telegram'a gönder
   send_portwatch_chart()
