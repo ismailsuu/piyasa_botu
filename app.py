@@ -1,99 +1,222 @@
 from datetime import datetime, timedelta
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 import requests
 import streamlit as st
+import yfinance as yf
+
+# Sayfa Yapılandırması
+st.set_page_config(
+    page_title="Piyasa & Deniz Ticareti Paneli",
+    page_icon="📈",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
+
+# Takip Edilen Enstrümanlar
+TICKERS = {
+    "Bitcoin (BTC)": "BTC-USD",
+    "Altın (Ons)": "GC=F",
+    "Gümüş (Ons)": "SI=F",
+    "Brent Petrol": "BZ=F",
+    "Doğalgaz": "NG=F",
+    "Pamuk (#2)": "CT=F",
+    "USD/TRY": "USDTRY=X",
+    "ABD 10Y Tahvil": "^TNX",
+    "USD/CNY": "CNY=X",
+}
+
+# --- YAN MENÜ (SIDEBAR) ---
+st.sidebar.header("⚙️ Ayarlar ve Filtreler")
+selected_label = st.sidebar.selectbox("Enstrüman Seçin", list(TICKERS.keys()))
+selected_ticker = TICKERS[selected_label]
+
+period_map = {
+    "1 Ay": "1mo",
+    "6 Ay": "6mo",
+    "1 Yıl": "1y",
+    "3 Yıl": "3y",
+    "5 Yıl": "5y",
+    "10 Yıl": "10y",
+    "Tümü (Maks)": "max",
+}
+selected_period_label = st.sidebar.selectbox(
+    "Zaman Dilimi", list(period_map.keys()), index=5
+)  # Varsayılan: 10 Yıl
+selected_period = period_map[selected_period_label]
+
+interval_choice = st.sidebar.radio(
+    "Veri Periyodu", ["Günlük", "Haftalık", "Aylık"], index=0
+)
+interval_map = {"Günlük": "1d", "Haftalık": "1wk", "Aylık": "1mo"}
 
 
-@st.cache_data(ttl=3600)  # Her saat başı güncellenir, siteyi yormaz
-def fetch_portwatch_vessel_data():
-  """PortWatch'tan Babülmendep ve Süveyş için detaylı gemi/yük türü verilerini çeker."""
+# --- VERİ ÇEKME (ÖNBELLEKLİ) ---
+@st.cache_data(ttl=1800)
+def load_market_data(ticker_symbol, period, interval):
+  try:
+    t = yf.Ticker(ticker_symbol)
+    df = t.history(period=period, interval=interval)
+    if not df.empty:
+      df.index = pd.to_datetime(df.index)
+    return df
+  except Exception:
+    return pd.DataFrame()
+
+
+@st.cache_data(ttl=3600)
+def fetch_portwatch_data():
+  """IMF PortWatch açık servisinden Süveyş ve Babülmendep verilerini çeker."""
   url = "https://services9.arcgis.com/weJ1QsnbMYJlCHdG/arcgis/rest/services/Daily_Chokepoints_Data/FeatureServer/0/query"
   headers = {"User-Agent": "Mozilla/5.0"}
+  points = [("Suez", "Süveyş Kanalı"), ("Bab el-Mandeb", "Babülmendep")]
+  records = []
 
-  hedef_noktalar = [
-      ("Suez", "Süveyş Kanalı"),
-      ("Bab el-Mandeb", "Babülmendep"),
-  ]
-
-  toplu_kayitlar = []
-
-  for anahtar, boğaz_adi in hedef_noktalar:
-    # 10 yıllık geniş veri seti çekimi (ArcGIS üst sınırı dahilinde)
+  for keyword, label in points:
     params = {
-        "where": f"name LIKE '%{anahtar}%'",
+        "where": f"name LIKE '%{keyword}%'",
         "outFields": (
             "date,transit_calls,n_container,n_tanker,n_dry_bulk,n_general_cargo"
         ),
         "orderByFields": "date DESC",
-        "resultRecordCount": 3650,  # Yaklaşık 10 yıl
+        "resultRecordCount": 3650,  # 10 yıla kadar
         "f": "json",
     }
     try:
-      res = requests.get(url, params=params, headers=headers, timeout=20)
-      features = res.json().get("features", [])
-      for f in features:
+      r = requests.get(url, params=params, headers=headers, timeout=15).json()
+      for f in r.get("features", []):
         attr = f["attributes"]
-        # Milisaniye timestamp'i tarihe çevir
-        tarih = pd.to_datetime(attr.get("date"), unit="ms")
-
-        # Farklı yük türlerini satır satır ekle (Plotly kolay çizsin diye)
-        turler = {
+        dt = pd.to_datetime(attr.get("date"), unit="ms")
+        mapping = {
             "Toplam Gemi": attr.get("transit_calls", 0),
             "Konteyner (Container)": attr.get("n_container", 0),
             "Tanker (Petrol/Kimyasal)": attr.get("n_tanker", 0),
             "Kuru Yük (Dry Bulk)": attr.get("n_dry_bulk", 0),
             "Genel Kargo": attr.get("n_general_cargo", 0),
         }
-
-        for tur_adi, sayi in turler.items():
-          if sayi is not None:
-            toplu_kayitlar.append({
-                "Boğaz": boğaz_adi,
-                "Tarih": tarih,
-                "Yük/Gemi Türü": tur_adi,
-                "Günlük Geçiş Sayısı": sayi,
+        for tur, adet in mapping.items():
+          if adet is not None:
+            records.append({
+                "Boğaz": label,
+                "Tarih": dt,
+                "Yük/Gemi Türü": tur,
+                "Geçiş Sayısı": adet,
             })
-    except Exception as e:
-      print(f"{boğaz_adi} verisi çekilemedi: {e}")
+    except Exception:
+      pass
+  return pd.DataFrame(records)
 
-  return pd.DataFrame(toplu_kayitlar)
 
+# --- ANA EKRAN: PİYASA PANELİ ---
+st.title("📈 10 Yıllık Finansal Gösterge Paneli")
+st.caption(
+    "Veriler Yahoo Finance üzerinden canlı ve geçmişe dönük olarak"
+    " çekilmektedir."
+)
 
-# ==========================================
-# STREAMLIT ARAYÜZÜ BÖLÜMÜ
-# ==========================================
+df_market = load_market_data(
+    selected_ticker, selected_period, interval_map[interval_choice]
+)
+
+if not df_market.empty:
+  last_price = df_market["Close"].iloc[-1]
+  period_high = df_market["High"].max()
+  period_low = df_market["Low"].min()
+  data_count = len(df_market)
+
+  # Değişim Oranı
+  if len(df_market) > 1:
+    prev_price = df_market["Close"].iloc[-2]
+    diff = last_price - prev_price
+    pct_change = (diff / prev_price) * 100
+  else:
+    diff, pct_change = 0, 0
+
+  # Metrik Kartları
+  c1, c2, c3, c4 = st.columns(4)
+  c1.metric(
+      "Son Kapanış Fiyatı",
+      f"{last_price:,.2f}",
+      f"%{pct_change:.2f}",
+      delta_color="normal",
+  )
+  c2.metric("Periyot En Yüksek", f"{period_high:,.2f}")
+  c3.metric("Periyot En Düşük", f"{period_low:,.2f}")
+  c4.metric("Veri Sayısı", f"{data_count} Gün")
+
+  # Sekmeler: Çizgi, Mum ve Tablo
+  tab_line, tab_candle, tab_table = st.tabs(
+      ["📈 Fiyat Grafiği (Çizgi)", "🕯️ Mum Grafik (Detaylı)", "📋 Veri Tablosu"]
+  )
+
+  with tab_line:
+    fig_line = px.line(
+        df_market,
+        x=df_market.index,
+        y="Close",
+        title=f"{selected_label} - Fiyat Trendi",
+    )
+    fig_line.update_layout(
+        hovermode="x unified", xaxis_title="Tarih", yaxis_title="Fiyat"
+    )
+    st.plotly_chart(fig_line, use_container_width=True)
+
+  with tab_candle:
+    fig_candle = go.Figure(
+        data=[
+            go.Candlestick(
+                x=df_market.index,
+                open=df_market["Open"],
+                high=df_market["High"],
+                low=df_market["Low"],
+                close=df_market["Close"],
+                name="OHLC",
+            )
+        ]
+    )
+    fig_candle.update_layout(
+        title=f"{selected_label} - Mum Grafiği",
+        xaxis_rangeslider_visible=False,
+    )
+    st.plotly_chart(fig_candle, use_container_width=True)
+
+  with tab_table:
+    st.dataframe(
+        df_market[["Open", "High", "Low", "Close", "Volume"]].sort_index(
+            ascending=False
+        ),
+        use_container_width=True,
+    )
+else:
+  st.warning(f"{selected_label} için veri alınamadı.")
+
+# --- BÖLÜM 2: IMF PORTWATCH DENİZ TRAFİĞİ & YÜK TÜRLERİ ---
 st.divider()
 st.header("🚢 IMF PortWatch: Deniz Ticareti ve Boğaz Geçişleri")
 st.caption(
-    "Süveyş Kanalı ve Babülmendep Boğazı'ndan geçen yük ve tanker trafiği"
+    "Süveyş Kanalı ve Babülmendep Boğazı yük ve tanker trafiği analizi (10 Yıla"
+    " kadar geçmiş veriler)"
 )
 
-# Veriyi yükle
-df_gemiler = fetch_portwatch_vessel_data()
+df_ships = fetch_portwatch_data()
 
-if not df_gemiler.empty:
-  # Filtreleme Alanı (Kolonlar halinde yan yana)
-  col1, col2, col3 = st.columns(3)
-
-  with col1:
-    secilen_bogaz = st.selectbox(
-        "📍 Boğaz / Kanal Seçin:",
-        options=df_gemiler["Boğaz"].unique(),
-        index=0,
+if not df_ships.empty:
+  col_b, col_z, col_t = st.columns(3)
+  with col_b:
+    sec_bogaz = st.selectbox(
+        "📍 Boğaz / Kanal Seçin:", df_ships["Boğaz"].unique(), index=0
     )
-
-  with col2:
-    zaman_araligi = st.selectbox(
+  with col_z:
+    sec_zaman = st.selectbox(
         "📅 Zaman Dilimi:",
-        options=["Son 1 Yıl", "Son 3 Yıl", "Son 5 Yıl", "Son 10 Yıl (Tümü)"],
-        index=1,  # Varsayılan: Son 3 Yıl
+        ["Son 1 Yıl", "Son 3 Yıl", "Son 5 Yıl", "Son 10 Yıl (Tümü)"],
+        index=1,
     )
-
-  with col3:
-    secilen_turler = st.multiselect(
+  with col_t:
+    sec_turler = st.multiselect(
         "📦 Gemi / Yük Türleri:",
-        options=df_gemiler["Yük/Gemi Türü"].unique(),
+        options=df_ships["Yük/Gemi Türü"].unique(),
         default=[
             "Konteyner (Container)",
             "Tanker (Petrol/Kimyasal)",
@@ -101,41 +224,37 @@ if not df_gemiler.empty:
         ],
     )
 
-  # Zaman Filtresini Uygula
-  bugun = df_gemiler["Tarih"].max()
-  gun_map = {
+  # Zaman Aralığı Filtreleme
+  max_date = df_ships["Tarih"].max()
+  days_dict = {
       "Son 1 Yıl": 365,
       "Son 3 Yıl": 365 * 3,
       "Son 5 Yıl": 365 * 5,
       "Son 10 Yıl (Tümü)": 365 * 10,
   }
-  baslangic_tarihi = bugun - timedelta(days=gun_map[zaman_araligi])
+  cutoff = max_date - timedelta(days=days_dict[sec_zaman])
 
-  # DataFrame Filtreleme
-  filtrelenmis_df = df_gemiler[
-      (df_gemiler["Boğaz"] == secilen_bogaz)
-      & (df_gemiler["Tarih"] >= baslangic_tarihi)
-      & (df_gemiler["Yük/Gemi Türü"].isin(secilen_turler))
+  filtered_ships = df_ships[
+      (df_ships["Boğaz"] == sec_bogaz)
+      & (df_ships["Tarih"] >= cutoff)
+      & (df_ships["Yük/Gemi Türü"].isin(sec_turler))
   ]
 
-  # İnteraktif Plotly Grafiği
-  if not filtrelenmis_df.empty:
-    fig = px.line(
-        filtrelenmis_df,
+  if not filtered_ships.empty:
+    fig_ship = px.line(
+        filtered_ships,
         x="Tarih",
-        y="Günlük Geçiş Sayısı",
+        y="Geçiş Sayısı",
         color="Yük/Gemi Türü",
-        title=f"{secilen_bogaz} - {zaman_araligi} Geçiş Dağılımı",
+        title=f"{sec_bogaz} - {sec_zaman} Gemi ve Yük Geçiş Dağılımı",
     )
-    fig.update_layout(
+    fig_ship.update_layout(
         hovermode="x unified",
         xaxis_title="Tarih",
         yaxis_title="Günlük Gemi Sayısı",
-        legend_title="Gemi Türü",
-        template="plotly_dark",  # Sitenizin koyu/açık temasına uyum sağlar
     )
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig_ship, use_container_width=True)
   else:
-    st.warning("Seçilen filtrelere uygun veri bulunamadı.")
+    st.info("Seçili filtrelere uygun gemi verisi bulunamadı.")
 else:
-  st.info("PortWatch verileri yükleniyor veya şu an erişilemiyor...")
+  st.warning("PortWatch verileri şu anda yüklenemiyor.")
