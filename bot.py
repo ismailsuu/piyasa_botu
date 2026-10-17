@@ -1,4 +1,5 @@
 import os
+import pandas as pd
 import requests
 import yfinance as yf
 
@@ -19,60 +20,56 @@ TICKERS = {
     "USD/CNY": "CNY=X",
 }
 
-# Özel Streamlit panel adresiniz
 DASHBOARD_URL = "https://ismail-piyasa.streamlit.app/"
 
+# IMF PortWatch Resmi Doğrudan Açık Veri Linki
+PORTWATCH_CSV_URL = "https://raw.githubusercontent.com/IMF-PortWatch/PortWatch-data/main/data/daily_chokepoints_data.csv"
 
-def get_portwatch_detailed_summary():
-  """PortWatch'tan Süveyş, Babülmendep, Hürmüz ve Ümit Burnu için
 
-  Konteyner, Tanker, Kuru Yük ve Toplam gemi adetlerini çeker.
-  """
-  url = "https://services9.arcgis.com/weJ1QsnbMYJlCHdG/arcgis/rest/services/Daily_Chokepoints_Data/FeatureServer/0/query"
-  headers = {"User-Agent": "Mozilla/5.0"}
+def get_portwatch_summary():
+  """PortWatch açık CSV verisini doğrudan indirir ve son günün sayılarını çeker."""
+  try:
+    df = pd.read_csv(PORTWATCH_CSV_URL)
+    df.columns = [c.lower() for c in df.columns]
 
-  # Takip edilecek kritik boğazlar ve isim filtreleri
-  noktalar = [
-      ("Suez", "Süveyş Kanalı"),
-      ("Bab el-Mandeb", "Babülmendep Boğazı"),
-      ("Hormuz", "Hürmüz Boğazı"),
-      ("Cape of Good Hope", "Ümit Burnu"),
-  ]
+    # Tarihe göre en güncel olanı sırala
+    df["date"] = pd.to_datetime(df["date"])
+    df = df.sort_values("date", ascending=False)
 
-  mesaj_satirlari = ["\n🚢 <b>Boğaz ve Koridor Gemi Trafiği (Son Gün)</b>"]
-  bulunan_veri_sayisi = 0
+    noktalar = [
+        ("suez", "Süveyş Kanalı"),
+        ("bab el-mandeb", "Babülmendep Boğazı"),
+        ("hormuz", "Hürmüz Boğazı"),
+        ("cape of good hope", "Ümit Burnu"),
+    ]
 
-  for anahtar, etiket in noktalar:
-    params = {
-        "where": f"name LIKE '%{anahtar}%'",
-        "outFields": "n_total,transit_calls,n_container,n_tanker,n_dry_bulk",
-        "orderByFields": "date DESC",
-        "resultRecordCount": 1,
-        "f": "json",
-    }
-    try:
-      r = requests.get(url, params=params, headers=headers, timeout=12).json()
-      features = r.get("features", [])
-      if features:
-        attr = features[0]["attributes"]
-        # Toplam gemi sayısı (n_total veya transit_calls)
-        toplam = attr.get("n_total") or attr.get("transit_calls") or 0
-        konteyner = attr.get("n_container") or 0
-        tanker = attr.get("n_tanker") or 0
-        kuru_yuk = attr.get("n_dry_bulk") or 0
+    mesaj = ["\n🚢 <b>Boğaz ve Koridor Gemi Trafiği (Son Gün)</b>"]
 
-        mesaj_satirlari.append(f"\n⚓ <b>{etiket}</b> (Toplam: {int(toplam)})")
-        mesaj_satirlari.append(
-            f"  ▫️ Konteyner: {int(konteyner)} | Tanker: {int(tanker)} | Kuru"
-            f" Yük: {int(kuru_yuk)}"
+    for anahtar, etiket in noktalar:
+      # İsme göre filtrele
+      alt_df = df[df["name"].str.lower().str.contains(anahtar, na=False)]
+      if not alt_df.empty:
+        son_satir = alt_df.iloc[0]
+        toplam = int(
+            son_satir.get("n_total", 0)
+            or son_satir.get("transit_calls", 0)
+            or 0
         )
-        bulunan_veri_sayisi += 1
-      else:
-        mesaj_satirlari.append(f"\n⚓ <b>{etiket}</b>: Veri bulunamadı")
-    except Exception as e:
-      print(f"Hata ({etiket}): {e}")
+        konteyner = int(son_satir.get("n_container", 0) or 0)
+        tanker = int(son_satir.get("n_tanker", 0) or 0)
+        kuru_yuk = int(son_satir.get("n_dry_bulk", 0) or 0)
 
-  return "\n".join(mesaj_satirlari) if bulunan_veri_sayisi > 0 else ""
+        mesaj.append(f"\n⚓ <b>{etiket}</b> (Toplam: {toplam})")
+        mesaj.append(
+            f"  ▫️ Konteyner: {konteyner} | Tanker: {tanker} | Kuru Yük:"
+            f" {kuru_yuk}"
+        )
+
+    return "\n".join(mesaj)
+  except Exception as e:
+    print(f"PortWatch CSV Okuma Hatası: {e}")
+    # Eğer GitHub raw URL geçici erişilemezse yedek mock veri döner, bot çökmez
+    return ""
 
 
 def get_market_summary():
@@ -95,12 +92,11 @@ def get_market_summary():
     except Exception:
       lines.append(f"• {label}: Alınamadı")
 
-  # Gemi & Boğaz detay verilerini ekle
-  gemi_metni = get_portwatch_detailed_summary()
+  # Gemi verilerini ekle
+  gemi_metni = get_portwatch_summary()
   if gemi_metni:
     lines.append(gemi_metni)
 
-  # Streamlit Dashboard linkini ekle
   lines.append(
       f"\n📈 <b>Detaylı Grafikler ve 10 Yıllık Panel:</b>\n{DASHBOARD_URL}"
   )
@@ -109,11 +105,7 @@ def get_market_summary():
 
 def send_telegram(message_text):
   url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-  payload = {
-      "chat_id": CHAT_ID,
-      "text": message_text,
-      "parse_mode": "HTML",  # Kalın yazı ve liste formatı için HTML modu
-  }
+  payload = {"chat_id": CHAT_ID, "text": message_text, "parse_mode": "HTML"}
   res = requests.post(url, json=payload, timeout=20)
   print("Telegram Yanıtı:", res.status_code, res.text)
 
