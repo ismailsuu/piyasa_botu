@@ -10,7 +10,7 @@ def send_telegram(mesaj):
       "chat_id": CHAT_ID,
       "text": mesaj,
       "parse_mode": "HTML",
-      "disable_web_page_preview": True,
+      "disable_web_page_preview": True,  # O devasa önizleme kartını kapatır, şık ve sade durur
   }
   res = requests.post(url, json=payload, timeout=15)
   print("Telegram Yanıtı:", res.status_code, res.text)
@@ -87,8 +87,10 @@ def main():
       print(f"{etiket} hatası: {e}")
 
   if bulunan > 0:
+    # LİNK EN ALTA EKLENDİ:
     mesajlar.append(
-        "📊 <b>Detaylı ve 10 Yıllık Geçmiş Grafikler:</b>\nhttps://ismail-piyasa.streamlit.app/"
+        "📊 <b>Detaylı Grafikler ve Canlı Panel:</b>\n👉"
+        " https://ismail-piyasa.streamlit.app/"
     )
     send_telegram("\n".join(mesajlar))
 
