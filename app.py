@@ -72,7 +72,7 @@ if app_mode == "📈 Finansal Piyasalar":
     except Exception:
       return pd.DataFrame()
 
-  st.title("📈 10 Yıllık Finansal Gösterge Paneli")
+  st.title("📈 Finansal Gösterge Paneli")
   st.caption(
       "Veriler Yahoo Finance üzerinden canlı ve geçmişe dönük olarak"
       " çekilmektedir."
@@ -171,8 +171,8 @@ else:
 
   secilen_aralik = st.sidebar.radio(
       "Zaman Aralığı",
-      ["Son 1 Yıl", "Son 3 Yıl", "Son 5 Yıl", "Tümü (Tüm Geçmiş)"],
-      index=1,
+      ["Son 1 Yıl", "Son 3 Yıl", "Son 5 Yıl", "Tüm Geçmiş (2019 - 2026)"],
+      index=3,
   )
 
   @st.cache_data(ttl=86400)
@@ -182,31 +182,31 @@ else:
 
     tum_kayitlar = []
     offset = 0
-    limit = 2000
 
+    # 2019'dan bugüne tüm günleri 1000'erli paketlerle eksiksiz çekiyoruz
     while True:
       params = {
           "where": f"portid='{pid}'",
           "outFields": "date,n_total,n_tanker,n_container,n_dry_bulk",
-          "orderByFields": "date asc",
+          "orderByFields": "date desc",
           "resultOffset": offset,
-          "resultRecordCount": limit,
+          "resultRecordCount": 1000,
           "f": "json",
       }
       try:
-        r = requests.get(endpoint, params=params, headers=headers, timeout=20)
+        r = requests.get(endpoint, params=params, headers=headers, timeout=25)
         if r.status_code == 200:
-          features = r.json().get("features", [])
+          data = r.json()
+          features = data.get("features", [])
           if not features:
             break
           tum_kayitlar.extend([f["attributes"] for f in features])
-          if len(features) < limit:
+          if len(features) < 1000:
             break
-          offset += limit
+          offset += len(features)
         else:
           break
-      except Exception as e:
-        print("PortWatch API Hatası:", e)
+      except Exception:
         break
 
     if tum_kayitlar:
@@ -218,7 +218,7 @@ else:
 
     return pd.DataFrame()
 
-  with st.spinner("Tarihsel gemi verileri yükleniyor..."):
+  with st.spinner("2019-2026 tüm veri arşivi yükleniyor..."):
     df_pw = load_portwatch_history(selected_pid)
 
   if not df_pw.empty:
@@ -259,7 +259,7 @@ else:
           df_filtre,
           x="date",
           y=["n_tanker", "n_container", "n_dry_bulk"],
-          title=f"{secilen_bogaz} - Gemi Türlerine Göre Trend",
+          title=f"{secilen_bogaz} - Gemi Türlerine Göre Trend ({secilen_aralik})",
           labels={"date": "Tarih", "value": "Geçiş Sayısı", "variable": "Tür"},
           color_discrete_map={
               "n_tanker": "#e74c3c",
