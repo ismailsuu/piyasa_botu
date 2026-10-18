@@ -7,79 +7,178 @@ import yfinance as yf
 
 # Sayfa Yapılandırması
 st.set_page_config(
-    page_title="Finans ve Deniz Trafiği Gösterge Paneli",
+    page_title="Dashboard | Gösterge Paneli",
     page_icon="📊",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
-# --- YAN MENÜ: ANA MOD SEÇİMİ ---
-st.sidebar.title("🧭 Menü")
+# ==========================================
+# DİL SÖZLÜĞÜ (TR / EN)
+# ==========================================
+LANG = {
+    "TR": {
+        "menu_title": "🧭 Menü",
+        "market_mode": "📈 Finansal Piyasalar",
+        "marine_mode": "🚢 Deniz Trafiği (IMF PortWatch)",
+        "market_settings": "⚙️ Piyasa Ayarları",
+        "instrument": "Enstrüman Seçin",
+        "timeframe": "Zaman Dilimi",
+        "data_period": "Veri Periyodu",
+        "intervals": ["Günlük", "Haftalık", "Aylık"],
+        "periods": ["1 Ay", "6 Ay", "1 Yıl", "3 Yıl", "5 Yıl", "10 Yıl", "Tümü (Maks)"],
+        "market_title": "📈 Finansal Gösterge Paneli",
+        "market_sub": "Veriler Yahoo Finance üzerinden canlı ve geçmişe dönük olarak çekilmektedir.",
+        "last_close": "Son Kapanış Fiyatı",
+        "period_high": "Periyot En Yüksek",
+        "period_low": "Periyot En Düşük",
+        "data_count": "Veri Sayısı",
+        "tab_line": "📈 Fiyat Grafiği (Çizgi)",
+        "tab_candle": "🕯️ Mum Grafik (Detaylı)",
+        "tab_table": "📋 Veri Tablosu",
+        "price_trend": "Fiyat Trendi",
+        "candle_title": "Mum Grafiği",
+        "no_data": "için veri alınamadı.",
+        "marine_title": "🚢 Kritik Boğazlar Deniz Trafiği Analizi",
+        "marine_sub": "Veriler IMF PortWatch açık servisinden canlı çekilmektedir.",
+        "marine_settings": "⚓ Deniz Trafiği Ayarları",
+        "strait": "Boğaz / Geçit",
+        "chokepoints": {
+            "Süveyş Kanalı": "chokepoint1",
+            "Babülmendep Boğazı": "chokepoint2",
+            "Hürmüz Boğazı": "chokepoint6",
+            "Ümit Burnu": "chokepoint8",
+        },
+        "time_ranges": ["Son 1 Yıl", "Son 3 Yıl", "Son 5 Yıl", "Tüm Geçmiş (2019 - Günümüz)"],
+        "spinner_text": "Tüm veri arşivi yükleniyor...",
+        "daily_total": "Son Günlük Toplam",
+        "tanker": "Tanker",
+        "container": "Konteyner",
+        "dry_bulk": "Kuru Yük",
+        "tab_total": "📈 Toplam Geçiş Trendi",
+        "tab_types": "📊 Gemi Türleri Dağılımı",
+        "tab_raw": "📋 Ham Veri",
+        "chart_total_title": "Günlük Toplam Gemi Geçişi",
+        "chart_types_title": "Gemi Türlerine Göre Trend",
+        "daily_calls": "Günlük Geçiş Sayısı",
+        "date": "Tarih",
+        "type": "Tür",
+    },
+    "EN": {
+        "menu_title": "🧭 Navigation",
+        "market_mode": "📈 Financial Markets",
+        "marine_mode": "🚢 Maritime Traffic (IMF PortWatch)",
+        "market_settings": "⚙️ Market Settings",
+        "instrument": "Select Instrument",
+        "timeframe": "Timeframe",
+        "data_period": "Data Frequency",
+        "intervals": ["Daily", "Weekly", "Monthly"],
+        "periods": ["1 Month", "6 Months", "1 Year", "3 Years", "5 Years", "10 Years", "All (Max)"],
+        "market_title": "📈 Financial Dashboard",
+        "market_sub": "Live and historical market data powered by Yahoo Finance.",
+        "last_close": "Last Close Price",
+        "period_high": "Period High",
+        "period_low": "Period Low",
+        "data_count": "Data Points",
+        "tab_line": "📈 Line Chart",
+        "tab_candle": "🕯️ Candlestick Chart",
+        "tab_table": "📋 Data Table",
+        "price_trend": "Price Trend",
+        "candle_title": "Candlestick Chart",
+        "no_data": "No data found for",
+        "marine_title": "🚢 Chokepoints Maritime Traffic Analysis",
+        "marine_sub": "Live and historical transit data sourced from IMF PortWatch.",
+        "marine_settings": "⚓ Maritime Settings",
+        "strait": "Chokepoint / Strait",
+        "chokepoints": {
+            "Suez Canal": "chokepoint1",
+            "Bab el-Mandeb Strait": "chokepoint2",
+            "Strait of Hormuz": "chokepoint6",
+            "Cape of Good Hope": "chokepoint8",
+        },
+        "time_ranges": ["Last 1 Year", "Last 3 Years", "Last 5 Years", "All History (2019 - Present)"],
+        "spinner_text": "Loading historical archive...",
+        "daily_total": "Latest Daily Total",
+        "tanker": "Tankers",
+        "container": "Containers",
+        "dry_bulk": "Dry Bulk",
+        "tab_total": "📈 Total Transit Trend",
+        "tab_types": "📊 Transit Breakdown by Type",
+        "tab_raw": "📋 Raw Data",
+        "chart_total_title": "Daily Total Vessel Transits",
+        "chart_types_title": "Transit Trends by Vessel Type",
+        "daily_calls": "Daily Transit Count",
+        "date": "Date",
+        "type": "Vessel Type",
+    },
+}
+
+# --- HEM YAN MENÜYE HEM ANA EKRANA DİL SEÇİMİ ---
+lang_col1, lang_col2 = st.columns([8, 2])
+with lang_col2:
+  selected_lang = st.selectbox("🌐 Dil / Language", ["Türkçe 🇹🇷", "English 🇬🇧"], index=0)
+
+lang_code = "TR" if "Türkçe" in selected_lang else "EN"
+t = LANG[lang_code]
+
+# --- YAN MENÜ ---
+st.sidebar.title(t["menu_title"])
 app_mode = st.sidebar.radio(
-    "Görünüm Seçin",
-    ["📈 Finansal Piyasalar", "🚢 Deniz Trafiği (IMF PortWatch)"],
+    "Görünüm / View",
+    [t["market_mode"], t["marine_mode"]],
     index=0,
 )
 
 # ==========================================
 # 1. BÖLÜM: FİNANSAL PİYASALAR
 # ==========================================
-if app_mode == "📈 Finansal Piyasalar":
+if app_mode == t["market_mode"]:
   TICKERS = {
       "Bitcoin (BTC)": "BTC-USD",
-      "Altın (Ons)": "GC=F",
-      "Gümüş (Ons)": "SI=F",
-      "Brent Petrol": "BZ=F",
-      "Doğalgaz": "NG=F",
-      "Pamuk (#2)": "CT=F",
+      "Gold / Altın (Ons)": "GC=F",
+      "Silver / Gümüş (Ons)": "SI=F",
+      "Brent Crude": "BZ=F",
+      "Natural Gas": "NG=F",
+      "Cotton / Pamuk (#2)": "CT=F",
       "USD/TRY": "USDTRY=X",
-      "ABD 10Y Tahvil": "^TNX",
+      "US 10Y Yield": "^TNX",
       "USD/CNY": "CNY=X",
   }
 
   st.sidebar.markdown("---")
-  st.sidebar.header("⚙️ Piyasa Ayarları")
-  selected_label = st.sidebar.selectbox("Enstrüman Seçin", list(TICKERS.keys()))
+  st.sidebar.header(t["market_settings"])
+  selected_label = st.sidebar.selectbox(t["instrument"], list(TICKERS.keys()))
   selected_ticker = TICKERS[selected_label]
 
-  period_map = {
-      "1 Ay": "1mo",
-      "6 Ay": "6mo",
-      "1 Yıl": "1y",
-      "3 Yıl": "3y",
-      "5 Yıl": "5y",
-      "10 Yıl": "10y",
-      "Tümü (Maks)": "max",
-  }
-  selected_period_label = st.sidebar.selectbox(
-      "Zaman Dilimi", list(period_map.keys()), index=5
-  )
-  selected_period = period_map[selected_period_label]
+  raw_period_values = ["1mo", "6mo", "1y", "3y", "5y", "10y", "max"]
+  period_display_map = dict(zip(t["periods"], raw_period_values))
 
-  interval_choice = st.sidebar.radio(
-      "Veri Periyodu", ["Günlük", "Haftalık", "Aylık"], index=0
+  selected_period_label = st.sidebar.selectbox(
+      t["timeframe"], t["periods"], index=5
   )
-  interval_map = {"Günlük": "1d", "Haftalık": "1wk", "Aylık": "1mo"}
+  selected_period = period_display_map[selected_period_label]
+
+  interval_display_map = dict(zip(t["intervals"], ["1d", "1wk", "1mo"]))
+  interval_choice = st.sidebar.radio(
+      t["data_period"], t["intervals"], index=0
+  )
 
   @st.cache_data(ttl=1800)
   def load_market_data(ticker_symbol, period, interval):
     try:
-      t = yf.Ticker(ticker_symbol)
-      df = t.history(period=period, interval=interval)
+      ticker = yf.Ticker(ticker_symbol)
+      df = ticker.history(period=period, interval=interval)
       if not df.empty:
         df.index = pd.to_datetime(df.index)
       return df
     except Exception:
       return pd.DataFrame()
 
-  st.title("📈 Finansal Gösterge Paneli")
-  st.caption(
-      "Veriler Yahoo Finance üzerinden canlı ve geçmişe dönük olarak"
-      " çekilmektedir."
-  )
+  st.title(t["market_title"])
+  st.caption(t["market_sub"])
 
   df_market = load_market_data(
-      selected_ticker, selected_period, interval_map[interval_choice]
+      selected_ticker, selected_period, interval_display_map[interval_choice]
   )
 
   if not df_market.empty:
@@ -96,17 +195,17 @@ if app_mode == "📈 Finansal Piyasalar":
 
     c1, c2, c3, c4 = st.columns(4)
     c1.metric(
-        "Son Kapanış Fiyatı",
+        t["last_close"],
         f"{last_price:,.2f}",
         f"%{pct_change:.2f}",
         delta_color="normal",
     )
-    c2.metric("Periyot En Yüksek", f"{period_high:,.2f}")
-    c3.metric("Periyot En Düşük", f"{period_low:,.2f}")
-    c4.metric("Veri Sayısı", f"{data_count} Veri")
+    c2.metric(t["period_high"], f"{period_high:,.2f}")
+    c3.metric(t["period_low"], f"{period_low:,.2f}")
+    c4.metric(t["data_count"], f"{data_count}")
 
     tab_line, tab_candle, tab_table = st.tabs(
-        ["📈 Fiyat Grafiği (Çizgi)", "🕯️ Mum Grafik (Detaylı)", "📋 Veri Tablosu"]
+        [t["tab_line"], t["tab_candle"], t["tab_table"]]
     )
 
     with tab_line:
@@ -114,10 +213,10 @@ if app_mode == "📈 Finansal Piyasalar":
           df_market,
           x=df_market.index,
           y="Close",
-          title=f"{selected_label} - Fiyat Trendi",
+          title=f"{selected_label} - {t['price_trend']}",
       )
       fig_line.update_layout(
-          hovermode="x unified", xaxis_title="Tarih", yaxis_title="Fiyat"
+          hovermode="x unified", xaxis_title=t["date"], yaxis_title="Price"
       )
       st.plotly_chart(fig_line, use_container_width=True)
 
@@ -135,7 +234,7 @@ if app_mode == "📈 Finansal Piyasalar":
           ]
       )
       fig_candle.update_layout(
-          title=f"{selected_label} - Mum Grafiği",
+          title=f"{selected_label} - {t['candle_title']}",
           xaxis_rangeslider_visible=False,
       )
       st.plotly_chart(fig_candle, use_container_width=True)
@@ -148,30 +247,25 @@ if app_mode == "📈 Finansal Piyasalar":
           use_container_width=True,
       )
   else:
-    st.warning(f"{selected_label} için veri alınamadı.")
+    st.warning(f"{selected_label} {t['no_data']}")
 
 # ==========================================
 # 2. BÖLÜM: IMF PORTWATCH DENİZ TRAFİĞİ
 # ==========================================
 else:
-  st.title("🚢 Kritik Boğazlar Deniz Trafiği Analizi")
-  st.caption("Veriler IMF PortWatch açık servisinden canlı çekilmektedir.")
+  st.title(t["marine_title"])
+  st.caption(t["marine_sub"])
 
-  CHOKEPOINTS = {
-      "Süveyş Kanalı": "chokepoint1",
-      "Babülmendep Boğazı": "chokepoint2",
-      "Hürmüz Boğazı": "chokepoint6",
-      "Ümit Burnu": "chokepoint8",
-  }
+  chokepoints_dict = t["chokepoints"]
 
   st.sidebar.markdown("---")
-  st.sidebar.header("⚓ Deniz Trafiği Ayarları")
-  secilen_bogaz = st.sidebar.selectbox("Boğaz / Geçit", list(CHOKEPOINTS.keys()))
-  selected_pid = CHOKEPOINTS[secilen_bogaz]
+  st.sidebar.header(t["marine_settings"])
+  secilen_bogaz = st.sidebar.selectbox(t["strait"], list(chokepoints_dict.keys()))
+  selected_pid = chokepoints_dict[secilen_bogaz]
 
   secilen_aralik = st.sidebar.radio(
-      "Zaman Aralığı",
-      ["Son 1 Yıl", "Son 3 Yıl", "Son 5 Yıl", "Tüm Geçmiş (2019 - 2026)"],
+      t["timeframe"],
+      t["time_ranges"],
       index=3,
   )
 
@@ -183,7 +277,6 @@ else:
     tum_kayitlar = []
     offset = 0
 
-    # 2019'dan bugüne tüm günleri 1000'erli paketlerle eksiksiz çekiyoruz
     while True:
       params = {
           "where": f"portid='{pid}'",
@@ -218,54 +311,61 @@ else:
 
     return pd.DataFrame()
 
-  with st.spinner("2019-2026 tüm veri arşivi yükleniyor..."):
+  with st.spinner(t["spinner_text"]):
     df_pw = load_portwatch_history(selected_pid)
 
   if not df_pw.empty:
     bugun = df_pw["date"].max()
-    if secilen_aralik == "Son 1 Yıl":
+    if secilen_aralik == t["time_ranges"][0]:
       df_filtre = df_pw[df_pw["date"] >= bugun - pd.DateOffset(years=1)]
-    elif secilen_aralik == "Son 3 Yıl":
+    elif secilen_aralik == t["time_ranges"][1]:
       df_filtre = df_pw[df_pw["date"] >= bugun - pd.DateOffset(years=3)]
-    elif secilen_aralik == "Son 5 Yıl":
+    elif secilen_aralik == t["time_ranges"][2]:
       df_filtre = df_pw[df_pw["date"] >= bugun - pd.DateOffset(years=5)]
     else:
       df_filtre = df_pw
 
     son_gun = df_filtre.iloc[-1]
     g1, g2, g3, g4 = st.columns(4)
-    g1.metric("Son Günlük Toplam", f"{int(son_gun.get('n_total', 0))} Gemi")
-    g2.metric("Tanker", f"{int(son_gun.get('n_tanker', 0))}")
-    g3.metric("Konteyner", f"{int(son_gun.get('n_container', 0))}")
-    g4.metric("Kuru Yük", f"{int(son_gun.get('n_dry_bulk', 0))}")
+    g1.metric(t["daily_total"], f"{int(son_gun.get('n_total', 0))}")
+    g2.metric(t["tanker"], f"{int(son_gun.get('n_tanker', 0))}")
+    g3.metric(t["container"], f"{int(son_gun.get('n_container', 0))}")
+    g4.metric(t["dry_bulk"], f"{int(son_gun.get('n_dry_bulk', 0))}")
 
-    t1, t2, t3 = st.tabs(
-        ["📈 Toplam Geçiş Trendi", "📊 Gemi Türleri Dağılımı", "📋 Ham Veri"]
-    )
+    t1, t2, t3 = st.tabs([t["tab_total"], t["tab_types"], t["tab_raw"]])
 
     with t1:
       fig_trend = px.line(
           df_filtre,
           x="date",
           y="n_total",
-          title=f"{secilen_bogaz} - Günlük Toplam Gemi Geçişi ({secilen_aralik})",
-          labels={"date": "Tarih", "n_total": "Günlük Geçiş Sayısı"},
+          title=f"{secilen_bogaz} - {t['chart_total_title']} ({secilen_aralik})",
+          labels={"date": t["date"], "n_total": t["daily_calls"]},
       )
       fig_trend.update_layout(hovermode="x unified")
       st.plotly_chart(fig_trend, use_container_width=True)
 
     with t2:
+      df_filtre_renamed = df_filtre.rename(
+          columns={
+              "n_tanker": t["tanker"],
+              "n_container": t["container"],
+              "n_dry_bulk": t["dry_bulk"],
+          }
+      )
+      color_map = {
+          t["tanker"]: "#e74c3c",
+          t["container"]: "#3498db",
+          t["dry_bulk"]: "#f1c40f",
+      }
+
       fig_types = px.line(
-          df_filtre,
+          df_filtre_renamed,
           x="date",
-          y=["n_tanker", "n_container", "n_dry_bulk"],
-          title=f"{secilen_bogaz} - Gemi Türlerine Göre Trend ({secilen_aralik})",
-          labels={"date": "Tarih", "value": "Geçiş Sayısı", "variable": "Tür"},
-          color_discrete_map={
-              "n_tanker": "#e74c3c",
-              "n_container": "#3498db",
-              "n_dry_bulk": "#f1c40f",
-          },
+          y=[t["tanker"], t["container"], t["dry_bulk"]],
+          title=f"{secilen_bogaz} - {t['chart_types_title']} ({secilen_aralik})",
+          labels={"date": t["date"], "value": t["daily_calls"], "variable": t["type"]},
+          color_discrete_map=color_map,
       )
       fig_types.update_layout(hovermode="x unified")
       st.plotly_chart(fig_types, use_container_width=True)
@@ -282,4 +382,4 @@ else:
           use_container_width=True,
       )
   else:
-    st.warning(f"{secilen_bogaz} için geçmiş veri alınamadı.")
+    st.warning(f"{secilen_bogaz} {t['no_data']}")
