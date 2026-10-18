@@ -1,5 +1,3 @@
-import traceback
-import pandas as pd
 import requests
 
 BOT_TOKEN = "8609292057:AAEzjrPio_7af5lZWnwBI4fY6YX-16oB4mE"
@@ -17,71 +15,60 @@ def send_telegram(mesaj):
 
 
 def main():
-  # IMF PortWatch resmi CSV açık veri yolu
-  url = "https://raw.githubusercontent.com/IMF-PortWatch/PortWatch-data/main/data/daily_chokepoints_data.csv"
+  # PortWatch açık REST FeatureServer sorgusu
+  endpoint = "https://services9.arcgis.com/weJ1QsnbMYJlCHdG/arcgis/rest/services/Daily_Chokepoints_Data/FeatureServer/0/query"
 
-  try:
-    print("CSV indiriliyor...")
-    # Timeout ve user-agent ekleyerek istek atıyoruz
-    res = requests.get(
-        url, headers={"User-Agent": "Mozilla/5.0"}, timeout=20
-    )
-    if res.status_code != 200:
-      send_telegram(
-          f"⚠️ PortWatch İndirme Hatası! HTTP Kodu: {res.status_code}"
-      )
-      return
+  headers = {
+      "User-Agent": (
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+      ),
+      "Accept": "application/json",
+  }
 
-    import io
+  noktalar = [
+      ("Suez", "Süveyş Kanalı"),
+      ("Bab el-Mandeb", "Babülmendep Boğazı"),
+      ("Hormuz", "Hürmüz Boğazı"),
+      ("Cape of Good Hope", "Ümit Burnu"),
+  ]
 
-    df = pd.read_csv(io.StringIO(res.text))
-    df.columns = [c.lower() for c in df.columns]
+  mesajlar = ["🚢 <b>IMF PortWatch Deniz Trafiği Raporu</b>\n"]
+  bulunan = 0
 
-    df["date"] = pd.to_datetime(df["date"])
-    df = df.sort_values("date", ascending=False)
+  for anahtar, etiket in noktalar:
+    params = {
+        "where": f"name LIKE '%{anahtar}%'",
+        "outFields": "n_total,transit_calls,n_container,n_tanker,n_dry_bulk",
+        "orderByFields": "date desc",
+        "resultRecordCount": 1,
+        "f": "json",
+    }
+    try:
+      r = requests.get(endpoint, params=params, headers=headers, timeout=12)
+      if r.status_code == 200:
+        data = r.json()
+        features = data.get("features", [])
+        if features:
+          attr = features[0]["attributes"]
+          toplam = int(
+              attr.get("n_total") or attr.get("transit_calls") or 0
+          )
+          tanker = int(attr.get("n_tanker") or 0)
+          konteyner = int(attr.get("n_container") or 0)
+          kuru = int(attr.get("n_dry_bulk") or 0)
 
-    noktalar = [
-        ("suez", "Süveyş Kanalı"),
-        ("bab el-mandeb", "Babülmendep Boğazı"),
-        ("hormuz", "Hürmüz Boğazı"),
-        ("cape of good hope", "Ümit Burnu"),
-    ]
+          mesajlar.append(f"⚓ <b>{etiket}</b> (Toplam: {toplam})")
+          mesajlar.append(
+              f"  ▫️ Tanker: {tanker} | Konteyner: {konteyner} | Kuru: {kuru}\n"
+          )
+          bulunan += 1
+    except Exception as e:
+      print(f"{etiket} çekilemedi: {e}")
 
-    mesajlar = ["🚢 <b>IMF PortWatch Deniz Trafiği Raporu</b>\n"]
-    bulunan = 0
-
-    for anahtar, etiket in noktalar:
-      alt_df = df[df["name"].str.lower().str.contains(anahtar, na=False)]
-      if not alt_df.empty:
-        satir = alt_df.iloc[0]
-        toplam = int(
-            satir.get("n_total", 0)
-            or satir.get("transit_calls", 0)
-            or 0
-        )
-        tanker = int(satir.get("n_tanker", 0) or 0)
-        konteyner = int(satir.get("n_container", 0) or 0)
-        kuru = int(satir.get("n_dry_bulk", 0) or 0)
-
-        mesajlar.append(f"⚓ <b>{etiket}</b> (Toplam: {toplam})")
-        mesajlar.append(
-            f"  ▫️ Tanker: {tanker} | Konteyner: {konteyner} | Kuru: {kuru}\n"
-        )
-        bulunan += 1
-
-    if bulunan > 0:
-      send_telegram("\n".join(mesajlar))
-    else:
-      send_telegram(
-          "⚠️ PortWatch tablosu indi ancak eşleşen boğaz ismi bulunamadı!"
-      )
-
-  except Exception as e:
-    hata_metni = traceback.format_exc()
-    print("HATA DETAYI:\n", hata_metni)
-    send_telegram(
-        f"❌ <b>gemi_botu.py Çalışırken Hata Aldı:</b>\n<code>{str(e)[:500]}</code>"
-    )
+  if bulunan > 0:
+    send_telegram("\n".join(mesajlar))
+  else:
+    send_telegram("⚠️ PortWatch verisine şu an ulaşılamadı.")
 
 
 if __name__ == "__main__":
