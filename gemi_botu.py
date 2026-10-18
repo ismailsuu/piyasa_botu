@@ -15,30 +15,31 @@ def send_telegram(mesaj):
 
 
 def main():
-  # PortWatch açık REST FeatureServer sorgusu
   endpoint = "https://services9.arcgis.com/weJ1QsnbMYJlCHdG/arcgis/rest/services/Daily_Chokepoints_Data/FeatureServer/0/query"
 
   headers = {
       "User-Agent": (
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,"
+          " like Gecko) Chrome/120.0.0.0 Safari/537.36"
       ),
       "Accept": "application/json",
   }
 
+  # PortWatch kesin portid kodları
   noktalar = [
-      ("Suez", "Süveyş Kanalı"),
-      ("Bab el-Mandeb", "Babülmendep Boğazı"),
-      ("Hormuz", "Hürmüz Boğazı"),
-      ("Cape of Good Hope", "Ümit Burnu"),
+      ("chokepoint1", "Süveyş Kanalı"),
+      ("chokepoint2", "Babülmendep Boğazı"),
+      ("chokepoint6", "Hürmüz Boğazı"),
+      ("chokepoint8", "Ümit Burnu"),
   ]
 
   mesajlar = ["🚢 <b>IMF PortWatch Deniz Trafiği Raporu</b>\n"]
   bulunan = 0
 
-  for anahtar, etiket in noktalar:
+  for pid, etiket in noktalar:
     params = {
-        "where": f"name LIKE '%{anahtar}%'",
-        "outFields": "n_total,transit_calls,n_container,n_tanker,n_dry_bulk",
+        "where": f"portid='{pid}'",
+        "outFields": "*",
         "orderByFields": "date desc",
         "resultRecordCount": 1,
         "f": "json",
@@ -49,26 +50,49 @@ def main():
         data = r.json()
         features = data.get("features", [])
         if features:
-          attr = features[0]["attributes"]
-          toplam = int(
-              attr.get("n_total") or attr.get("transit_calls") or 0
-          )
-          tanker = int(attr.get("n_tanker") or 0)
-          konteyner = int(attr.get("n_container") or 0)
-          kuru = int(attr.get("n_dry_bulk") or 0)
+          attr = features[0].get("attributes", {})
 
-          mesajlar.append(f"⚓ <b>{etiket}</b> (Toplam: {toplam})")
+          # Tüm olası kolon varyasyonlarını tara
+          toplam = (
+              attr.get("n_total")
+              or attr.get("transit_calls")
+              or attr.get("total_calls")
+              or 0
+          )
+          tanker = (
+              attr.get("n_tanker")
+              or attr.get("tanker_calls")
+              or attr.get("tankers")
+              or 0
+          )
+          konteyner = (
+              attr.get("n_container")
+              or attr.get("container_calls")
+              or attr.get("containers")
+              or 0
+          )
+          kuru = (
+              attr.get("n_dry_bulk")
+              or attr.get("dry_bulk_calls")
+              or attr.get("cargo_calls")
+              or 0
+          )
+
+          mesajlar.append(f"⚓ <b>{etiket}</b> (Toplam: {int(toplam)})")
           mesajlar.append(
-              f"  ▫️ Tanker: {tanker} | Konteyner: {konteyner} | Kuru: {kuru}\n"
+              f"  ▫️ Tanker: {int(tanker)} | Konteyner: {int(konteyner)} | Kuru"
+              f" Yük: {int(kuru)}\n"
           )
           bulunan += 1
     except Exception as e:
-      print(f"{etiket} çekilemedi: {e}")
+      print(f"{etiket} hatası: {e}")
 
   if bulunan > 0:
     send_telegram("\n".join(mesajlar))
   else:
-    send_telegram("⚠️ PortWatch verisine şu an ulaşılamadı.")
+    send_telegram(
+        "⚠️ PortWatch servisinden dönen veri boş veya şema farklı."
+    )
 
 
 if __name__ == "__main__":
