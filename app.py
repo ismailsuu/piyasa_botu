@@ -155,7 +155,7 @@ if app_mode == "📈 Finansal Piyasalar":
 # ==========================================
 else:
   st.title("🚢 Kritik Boğazlar Deniz Trafiği Analizi")
-  st.caption("Veriler IMF PortWatch açık servisinden çekilmektedir.")
+  st.caption("Veriler IMF PortWatch açık servisinden canlı çekilmektedir.")
 
   CHOKEPOINTS = {
       "Süveyş Kanalı": "chokepoint1",
@@ -171,39 +171,57 @@ else:
 
   secilen_aralik = st.sidebar.radio(
       "Zaman Aralığı",
-      ["Son 1 Yıl", "Son 3 Yıl", "Son 5 Yıl", "Tümü (10 Yıl)"],
+      ["Son 1 Yıl", "Son 3 Yıl", "Son 5 Yıl", "Tümü (Tüm Geçmiş)"],
       index=1,
   )
 
   @st.cache_data(ttl=86400)
   def load_portwatch_history(pid):
     endpoint = "https://services9.arcgis.com/weJ1QsnbMYJlCHdG/arcgis/rest/services/Daily_Chokepoints_Data/FeatureServer/0/query"
-    params = {
-        "where": f"portid='{pid}'",
-        "outFields": "date,n_total,n_tanker,n_container,n_dry_bulk",
-        "orderByFields": "date desc",
-        "resultRecordCount": 3650,  # Yaklaşık 10 yıllık günlük veri
-        "f": "json",
-    }
     headers = {"User-Agent": "Mozilla/5.0"}
-    try:
-      r = requests.get(endpoint, params=params, headers=headers, timeout=20)
-      if r.status_code == 200:
-        rows = [f["attributes"] for f in r.json().get("features", [])]
-        df = pd.DataFrame(rows)
-        if not df.empty and "date" in df.columns:
-          df["date"] = pd.to_datetime(df["date"], unit="ms")
-          df = df.sort_values("date")
-          return df
-    except Exception as e:
-      print("PortWatch API Hatası:", e)
+
+    tum_kayitlar = []
+    offset = 0
+    limit = 2000
+
+    while True:
+      params = {
+          "where": f"portid='{pid}'",
+          "outFields": "date,n_total,n_tanker,n_container,n_dry_bulk",
+          "orderByFields": "date asc",
+          "resultOffset": offset,
+          "resultRecordCount": limit,
+          "f": "json",
+      }
+      try:
+        r = requests.get(endpoint, params=params, headers=headers, timeout=20)
+        if r.status_code == 200:
+          features = r.json().get("features", [])
+          if not features:
+            break
+          tum_kayitlar.extend([f["attributes"] for f in features])
+          if len(features) < limit:
+            break
+          offset += limit
+        else:
+          break
+      except Exception as e:
+        print("PortWatch API Hatası:", e)
+        break
+
+    if tum_kayitlar:
+      df = pd.DataFrame(tum_kayitlar)
+      if "date" in df.columns:
+        df["date"] = pd.to_datetime(df["date"], unit="ms")
+        df = df.sort_values("date").reset_index(drop=True)
+        return df
+
     return pd.DataFrame()
 
   with st.spinner("Tarihsel gemi verileri yükleniyor..."):
     df_pw = load_portwatch_history(selected_pid)
 
   if not df_pw.empty:
-    # Tarih Filtresi
     bugun = df_pw["date"].max()
     if secilen_aralik == "Son 1 Yıl":
       df_filtre = df_pw[df_pw["date"] >= bugun - pd.DateOffset(years=1)]
@@ -214,7 +232,6 @@ else:
     else:
       df_filtre = df_pw
 
-    # Özet Metrikler (En son günün verileri)
     son_gun = df_filtre.iloc[-1]
     g1, g2, g3, g4 = st.columns(4)
     g1.metric("Son Günlük Toplam", f"{int(son_gun.get('n_total', 0))} Gemi")
@@ -222,7 +239,6 @@ else:
     g3.metric("Konteyner", f"{int(son_gun.get('n_container', 0))}")
     g4.metric("Kuru Yük", f"{int(son_gun.get('n_dry_bulk', 0))}")
 
-    # Grafik Sekmeleri
     t1, t2, t3 = st.tabs(
         ["📈 Toplam Geçiş Trendi", "📊 Gemi Türleri Dağılımı", "📋 Ham Veri"]
     )
