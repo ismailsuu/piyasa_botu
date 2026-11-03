@@ -1,14 +1,14 @@
 import requests
 
-endpoint = "https://services9.arcgis.com/weJ1QsnbMYJlCHdG/arcgis/rest/services/Daily_Chokepoints_Data/FeatureServer/0/query"
+# Şifre (Token) istemeyen güncel PortWatch servisi
+endpoint = "https://services9.arcgis.com/fqDgCAUbok0cvzq7/arcgis/rest/services/PortWatch_Chokepoints_Daily_Transit_Data/FeatureServer/0/query"
 headers = {"User-Agent": "Mozilla/5.0"}
 
-# Sunucudan filtre koymadan en son 50 kaydı istiyoruz
 params = {
     "where": "1=1",
-    "outFields": "portid,date,n_total",
+    "outFields": "*",
     "orderByFields": "date DESC",
-    "resultRecordCount": 50,
+    "resultRecordCount": 30,
     "f": "json"
 }
 
@@ -22,13 +22,13 @@ else:
     features = data.get("features", [])
     print(f"Gelen Kayıt Sayısı: {len(features)}")
     
-    # Sunucuda yer alan tüm benzersiz portid değerlerini toplayalım
-    bulunan_id_ler = set()
-    for f in features:
-        pid = f.get("attributes", {}).get("portid")
-        if pid:
-            bulunan_id_ler.add(pid)
+    if features:
+        print("\n--- ÖRNEK 1 KAYDIN TÜM ALANLARI VE DEĞERLERİ ---")
+        for k, v in features[0].get("attributes", {}).items():
+            print(f"{k}: {v}")
             
-    print("\n>>> SUNUCUDAKİ GERÇEK BOĞAZ ID'LERİ <<<")
-    for pid in sorted(bulunan_id_ler):
-        print(f"BULUNAN ID: {pid}")
+        print("\n--- TABLODAKİ GEÇİT / BOĞAZ DEĞERLERİ ---")
+        for f in features:
+            attr = f.get("attributes", {})
+            # Olası alanları ekrana yazdırıyoruz
+            print("Row:", {k: v for k, v in attr.items() if k in ['portid', 'chokepoint', 'name', 'chokepoint_name', 'n_total', 'transit_calls']})
