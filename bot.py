@@ -35,6 +35,7 @@ def get_market_summary():
         except Exception:
             lines.append(f"• {label}: Alınamadı")
 
+    lines.append("\n📊 <b>Canlı Panel:</b> https://ismail-piyasa.streamlit.app/")
     return "\n".join(lines)
 
 def send_telegram(message_text):
@@ -49,7 +50,8 @@ def send_telegram(message_text):
     payload = {
         "chat_id": chat_id, 
         "text": message_text,
-        "parse_mode": "HTML"
+        "parse_mode": "HTML",
+        "disable_web_page_preview": True,
     }
     res = requests.post(url, json=payload, timeout=20)
     print("Telegram Yanıtı:", res.status_code, res.text)
