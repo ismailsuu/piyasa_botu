@@ -3,219 +3,109 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Gemi Trafiği PWA</title>
+    <title>Lojistik PWA</title>
     
-    <!-- PWA Etiketleri -->
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#0f172a">
     <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/870/870143.png">
     
-    <!-- Kütüphaneler -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- TradingView Kütüphanesi -->
+    <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
 
     <style>
         :root { --bg: #0f172a; --card: #1e293b; --text: #f8fafc; --accent: #3b82f6; --border: #334155; }
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
         body { background-color: var(--bg); color: var(--text); padding: 20px; }
         
-        .header { margin-bottom: 20px; text-align: center; }
+        .header { margin-bottom: 15px; text-align: center; }
+        .header h2 { font-size: 1.5rem; margin-bottom: 5px; }
+        .header p { color: #94a3b8; font-size: 0.85rem; }
         
         /* Pill Menu */
-        .nav-pills { display: flex; gap: 10px; overflow-x: auto; white-space: nowrap; padding-bottom: 10px; margin-bottom: 20px; scrollbar-width: none; }
+        .nav-pills { display: flex; gap: 10px; overflow-x: auto; white-space: nowrap; padding-bottom: 10px; margin-bottom: 15px; scrollbar-width: none; }
         .nav-pills::-webkit-scrollbar { display: none; }
-        .pill { background-color: var(--card); border: 1px solid var(--border); color: var(--text); padding: 10px 20px; border-radius: 50px; cursor: pointer; transition: all 0.2s; }
+        .pill { background-color: var(--card); border: 1px solid var(--border); color: var(--text); padding: 10px 20px; border-radius: 50px; cursor: pointer; transition: all 0.2s; font-size: 0.9rem; }
         .pill.active { background-color: var(--accent); border-color: var(--accent); }
         
-        /* Metrikler */
-        .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 15px; margin-bottom: 20px; }
-        .card { background-color: var(--card); padding: 15px; border-radius: 12px; border: 1px solid var(--border); text-align: center; }
-        .card h4 { color: #94a3b8; font-size: 0.9rem; margin-bottom: 8px; font-weight: normal; }
-        .card h2 { font-size: 1.8rem; margin: 0; }
-        .date-info { color: #94a3b8; font-size: 0.8rem; text-align: center; margin-bottom: 20px; }
+        /* Grafik Konteyneri */
+        .chart-container { 
+            background-color: var(--card); 
+            border: 1px solid var(--border); 
+            border-radius: 12px; 
+            padding: 10px; 
+            height: calc(100vh - 180px); /* Ekrana tam oturması için dinamik yükseklik */
+            min-height: 400px;
+            width: 100%; 
+            overflow: hidden;
+        }
         
-        /* Grafik */
-        .chart-container { background-color: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 15px; height: 400px; position: relative; width: 100%; }
-        @media (max-width: 768px) { body { padding: 15px; } .chart-container { height: 300px; } }
-        
-        #loader { text-align: center; color: var(--accent); margin: 20px 0; font-weight: bold; padding: 10px; border-radius: 8px; background: rgba(59, 130, 246, 0.1); }
+        #tv_chart { width: 100%; height: 100%; }
+
+        @media (max-width: 768px) { 
+            body { padding: 15px; } 
+            .chart-container { height: calc(100vh - 150px); } 
+        }
     </style>
 </head>
 <body>
 
     <div class="header">
-        <h2>🚢 Kritik Boğazlar Trafiği</h2>
+        <h2>🚢 Küresel Denizcilik ve Navlun</h2>
+        <p>Tedarik Zinciri ve Lojistik Fiyatlamaları</p>
     </div>
 
-    <!-- Menü -->
+    <!-- Hızlı Seçim Menüsü -->
     <div class="nav-pills" id="menu">
-        <div class="pill active" onclick="changeStrait('Süveyş Kanalı')">Süveyş Kanalı</div>
-        <div class="pill" onclick="changeStrait('Babülmendep')">Babülmendep</div>
-        <div class="pill" onclick="changeStrait('Hürmüz')">Hürmüz</div>
-        <div class="pill" onclick="changeStrait('Ümit Burnu')">Ümit Burnu</div>
+        <div class="pill active" onclick="loadChart('AMEX:BDRY', this)">Kuru Yük (BDRY)</div>
+        <div class="pill" onclick="loadChart('NYSE:ZIM', this)">ZIM Konteyner</div>
+        <div class="pill" onclick="loadChart('XETR:HLAG', this)">Hapag-Lloyd</div>
+        <div class="pill" onclick="loadChart('OTC:AMKBY', this)">Maersk</div>
+        <div class="pill" onclick="loadChart('TVC:UKOIL', this)">Brent Petrol</div>
     </div>
 
-    <div id="loader">Canlı Veriler Aranıyor (1/2)...</div>
-    <div class="date-info" id="m-date"></div>
-
-    <div class="metrics">
-        <div class="card"><h4>Toplam</h4><h2 id="m-total">-</h2></div>
-        <div class="card"><h4>Tanker</h4><h2 id="m-tanker">-</h2></div>
-        <div class="card"><h4>Konteyner</h4><h2 id="m-container">-</h2></div>
-        <div class="card"><h4>Kuru Yük</h4><h2 id="m-bulk">-</h2></div>
-    </div>
-
+    <!-- TradingView Grafiği -->
     <div class="chart-container">
-        <canvas id="myChart"></canvas>
+        <div id="tv_chart"></div>
     </div>
 
     <script>
+        // PWA Servis Çalışanını Başlat
         if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('./sw.js').catch(err => console.log("SW Kayıt Hatası:", err));
+            navigator.serviceWorker.register('./sw.js').catch(err => console.log(err));
         }
 
-        let globalData = [];
-        let myChart = null;
+        let widget = null;
 
-        // Daha geniş eşleştirme havuzu
-        const chokepoints = {
-            'Süveyş Kanalı': ['chokepoint1', 'suez'],
-            'Babülmendep': ['chokepoint2', 'bab'],
-            'Hürmüz': ['chokepoint6', 'chokepoint3', 'hormuz'],
-            'Ümit Burnu': ['chokepoint8', 'chokepoint5', 'cape']
+        function loadChart(symbol, element) {
+            // Menü aktiflik durumunu güncelle
+            document.querySelectorAll('.pill').forEach(el => el.classList.remove('active'));
+            if(element) element.classList.add('active');
+
+            // Eski grafiği temizle ve yenisini yükle
+            document.getElementById('tv_chart').innerHTML = '';
+            
+            widget = new TradingView.widget({
+                "autosize": true,
+                "symbol": symbol,
+                "interval": "D",
+                "timezone": "Europe/Istanbul",
+                "theme": "dark",
+                "style": "2", // 1: Mum, 2: Çizgi, 3: Alan
+                "locale": "tr",
+                "enable_publishing": false,
+                "backgroundColor": "#1e293b",
+                "gridColor": "#334155",
+                "hide_top_toolbar": false,
+                "hide_legend": false,
+                "save_image": false,
+                "container_id": "tv_chart"
+            });
+        }
+
+        // Sayfa açıldığında ilk grafiği yükle
+        window.onload = () => {
+            loadChart('AMEX:BDRY', document.querySelector('.pill.active'));
         };
-
-        async function loadData() {
-            const loader = document.getElementById('loader');
-            const csvUrl = encodeURIComponent("https://hub.arcgis.com/api/v3/datasets/3da2b9ca97684916b75c4013f95d18ab_0/downloads/data?format=csv");
-            
-            // Yöntem 1: AllOrigins JSON Wrapper (Tarayıcı blokajlarını aşmak için en güvenlisi)
-            try {
-                loader.innerText = "Ana ağ geçidine bağlanılıyor...";
-                let res = await fetch(`https://api.allorigins.win/get?url=${csvUrl}`);
-                if (res.ok) {
-                    let data = await res.json();
-                    if (data.contents && data.contents.toLowerCase().includes("date")) {
-                        processCSV(data.contents);
-                        return;
-                    }
-                }
-            } catch (e) { console.log("Yöntem 1 Başarısız:", e); }
-
-            // Yöntem 2: CodeTabs Proxy (Fallback - Yedek)
-            try {
-                loader.innerText = "Yedek sunucular deneniyor...";
-                let res = await fetch(`https://api.codetabs.com/v1/proxy?quest=${csvUrl}`);
-                if (res.ok) {
-                    let text = await res.text();
-                    if (text && text.toLowerCase().includes("date")) {
-                        processCSV(text);
-                        return;
-                    }
-                }
-            } catch (e) { console.log("Yöntem 2 Başarısız:", e); }
-
-            loader.style.color = "#e74c3c";
-            loader.style.background = "rgba(231, 76, 60, 0.1)";
-            loader.innerText = "Bağlantı Kurulamadı. Lütfen sayfayı yenileyin.";
-        }
-
-        function processCSV(csvText) {
-            Papa.parse(csvText, {
-                header: true,
-                dynamicTyping: true,
-                skipEmptyLines: true,
-                complete: function(results) {
-                    // Sütun isimlerini küçük harfe zorla (bazen değişebiliyor)
-                    let normalizedData = results.data.map(row => {
-                        let newRow = {};
-                        for (let key in row) {
-                            if(key) newRow[key.toString().toLowerCase().trim()] = row[key];
-                        }
-                        return newRow;
-                    });
-                    
-                    globalData = normalizedData;
-                    document.getElementById('loader').style.display = 'none';
-                    changeStrait('Süveyş Kanalı'); 
-                }
-            });
-        }
-
-        function changeStrait(straitName) {
-            document.querySelectorAll('.pill').forEach(el => {
-                el.classList.remove('active');
-                if(el.innerText === straitName) el.classList.add('active');
-            });
-
-            const pids = chokepoints[straitName];
-            
-            let filtered = globalData.filter(r => {
-                let rId = (r.portid || r.chokepoint || r.name || "").toString().toLowerCase();
-                return pids.some(pid => rId.includes(pid));
-            });
-
-            filtered = filtered.map(r => {
-                let d = new Date(r.date);
-                // Eğer Unix Timestamp ise (sayısal)
-                if(!isNaN(r.date) && r.date > 1000000000) { d = new Date(r.date); }
-                
-                return {
-                    dateObj: d,
-                    dateStr: d.toISOString().split('T')[0],
-                    total: Number(r.n_total || r.transit_calls || r.total_calls || 0),
-                    tanker: Number(r.n_tanker || r.tanker_calls || r.tankers || 0),
-                    container: Number(r.n_container || r.container_calls || r.containers || 0),
-                    bulk: Number(r.n_dry_bulk || r.dry_bulk_calls || r.cargo_calls || 0)
-                };
-            }).filter(r => !isNaN(r.dateObj.getTime()) && r.total > 0);
-
-            filtered.sort((a,b) => b.dateObj - a.dateObj);
-            if(filtered.length === 0) return;
-
-            const latest = filtered[0];
-            document.getElementById('m-total').innerText = latest.total;
-            document.getElementById('m-tanker').innerText = latest.tanker;
-            document.getElementById('m-container').innerText = latest.container;
-            document.getElementById('m-bulk').innerText = latest.bulk;
-            document.getElementById('m-date').innerText = "Son Geçerli Veri: " + latest.dateStr;
-
-            let chartData = filtered.slice(0, 180).reverse();
-            drawChart(chartData, straitName);
-        }
-
-        function drawChart(data, name) {
-            const ctx = document.getElementById('myChart').getContext('2d');
-            if(myChart) myChart.destroy();
-            
-            myChart = new Chart(ctx, {
-                type: 'line',
-                data: {
-                    labels: data.map(d => d.dateStr),
-                    datasets: [{
-                        label: 'Toplam Geçiş',
-                        data: data.map(d => d.total),
-                        borderColor: '#3b82f6',
-                        backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                        borderWidth: 2,
-                        fill: true,
-                        pointRadius: 1,
-                        tension: 0.3
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: { legend: { display: false } },
-                    scales: {
-                        y: { grid: { color: '#334155' }, ticks: { color: '#94a3b8' } },
-                        x: { grid: { display: false }, ticks: { color: '#94a3b8', maxTicksLimit: 6 } }
-                    }
-                }
-            });
-        }
-        
-        loadData();
     </script>
 </body>
 </html>
