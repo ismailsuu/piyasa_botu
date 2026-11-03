@@ -50,7 +50,7 @@ LANG = {
             "Ümit Burnu": "chokepoint8",
         },
         "time_ranges": ["Son 1 Yıl", "Son 3 Yıl", "Son 5 Yıl", "Tüm Geçmiş (2019 - Günümüz)"],
-        "spinner_text": "Tüm veri arşivi yükleniyor...",
+        "spinner_text": "Veriler yükleniyor...",
         "daily_total": "Son Günlük Toplam",
         "tanker": "Tanker",
         "container": "Konteyner",
@@ -97,7 +97,7 @@ LANG = {
             "Cape of Good Hope": "chokepoint8",
         },
         "time_ranges": ["Last 1 Year", "Last 3 Years", "Last 5 Years", "All History (2019 - Present)"],
-        "spinner_text": "Loading historical archive...",
+        "spinner_text": "Loading data...",
         "daily_total": "Latest Daily Total",
         "tanker": "Tankers",
         "container": "Containers",
@@ -269,34 +269,25 @@ else:
         index=3,
     )
 
-    @st.cache_data(ttl=1800)
+    @st.cache_data(ttl=3600)
     def load_portwatch_history(pid):
         endpoint = "https://services9.arcgis.com/weJ1QsnbMYJlCHdG/arcgis/rest/services/Daily_Chokepoints_Data/FeatureServer/0/query"
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "application/json",
         }
 
-        # Olası portid alternatifleri (Hürmüz için chokepoint6/chokepoint3, Ümit Burnu için chokepoint8/chokepoint5 vb.)
-        id_map = {
-            "chokepoint1": ["chokepoint1", "suez"],
-            "chokepoint2": ["chokepoint2", "bab_el_mandeb"],
-            "chokepoint6": ["chokepoint6", "chokepoint3", "hormuz"],
-            "chokepoint8": ["chokepoint8", "chokepoint5", "cape_of_good_hope"],
-        }
-        gecerli_idler = id_map.get(pid, [pid])
-        id_sorgusu = " OR ".join([f"portid='{x}'" for x in gecerli_idler])
-
-        # En son işlenmiş 2000 dolu kaydı tek seferde çeker
+        # Sunucuyu yormayan hızlı ve doğrudan sorgu (Timeout önleme)
         params = {
-            "where": f"({id_sorgusu}) AND n_total > 0",
+            "where": f"portid='{pid}' AND n_total > 0",
             "outFields": "date,n_total,n_tanker,n_container,n_dry_bulk",
             "orderByFields": "date desc",
-            "resultRecordCount": 2000,
+            "resultRecordCount": 500,  # Hızlı yanıt için optimize edildi
             "f": "json",
         }
 
         try:
-            r = requests.get(endpoint, params=params, headers=headers, timeout=20)
+            r = requests.get(endpoint, params=params, headers=headers, timeout=35)
             if r.status_code == 200:
                 data = r.json()
                 features = data.get("features", [])
