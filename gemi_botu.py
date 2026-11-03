@@ -32,49 +32,51 @@ def main():
         "Accept": "application/json",
     }
 
+    # Boğazların olası portid varyasyonları
     noktalar = [
-        ("chokepoint1", "Süveyş Kanalı"),
-        ("chokepoint2", "Babülmendep Boğazı"),
-        ("chokepoint6", "Hürmüz Boğazı"),
-        ("chokepoint8", "Ümit Burnu"),
+        ("Süveyş Kanalı", ["chokepoint1", "suez"]),
+        ("Babülmendep Boğazı", ["chokepoint2", "bab_el_mandeb"]),
+        ("Hürmüz Boğazı", ["chokepoint6", "chokepoint3", "hormuz"]),
+        ("Ümit Burnu", ["chokepoint8", "chokepoint5", "cape_of_good_hope"]),
     ]
 
     mesajlar = ["🚢 <b>IMF PortWatch Deniz Trafiği Raporu</b>\n"]
     bulunan = 0
 
-    for pid, etiket in noktalar:
-        # n_total > 0 şartı: Henüz verisi işlenmemiş boş günleri atlar, verisi olan en güncel günü getirir
-        params = {
-            "where": f"portid='{pid}' AND n_total > 0",
-            "outFields": "date,n_total,n_tanker,n_container,n_dry_bulk",
-            "orderByFields": "date DESC",
-            "resultRecordCount": 1,
-            "f": "json",
-        }
+    for etiket, id_listesi in noktalar:
+        kayit = None
+        for pid in id_listesi:
+            params = {
+                "where": f"portid='{pid}' AND n_total > 0",
+                "outFields": "date,n_total,n_tanker,n_container,n_dry_bulk",
+                "orderByFields": "date DESC",
+                "resultRecordCount": 1,
+                "f": "json",
+            }
+            try:
+                r = requests.get(endpoint, params=params, headers=headers, timeout=12)
+                if r.status_code == 200:
+                    data = r.json()
+                    features = data.get("features", [])
+                    if features:
+                        kayit = features[0].get("attributes", {})
+                        break
+            except Exception:
+                pass
 
-        try:
-            r = requests.get(endpoint, params=params, headers=headers, timeout=15)
-            if r.status_code == 200:
-                data = r.json()
-                features = data.get("features", [])
-                if features:
-                    attr = features[0].get("attributes", {})
-                    toplam = attr.get("n_total") or 0
-                    tanker = attr.get("n_tanker") or 0
-                    konteyner = attr.get("n_container") or 0
-                    kuru = attr.get("n_dry_bulk") or 0
+        if kayit:
+            toplam = kayit.get("n_total") or 0
+            tanker = kayit.get("n_tanker") or 0
+            konteyner = kayit.get("n_container") or 0
+            kuru = kayit.get("n_dry_bulk") or 0
 
-                    mesajlar.append(f"⚓ <b>{etiket}</b> (Toplam: {int(toplam)})")
-                    mesajlar.append(
-                        f"  ▫️ Tanker: {int(tanker)} | Konteyner: {int(konteyner)} | Kuru Yük: {int(kuru)}\n"
-                    )
-                    bulunan += 1
-                else:
-                    print(f"{etiket} için n_total > 0 olan kayıt bulunamadı.")
-            else:
-                print(f"{etiket} HTTP Hatası: {r.status_code}")
-        except Exception as e:
-            print(f"{etiket} hatası: {e}")
+            mesajlar.append(f"⚓ <b>{etiket}</b> (Toplam: {int(toplam)})")
+            mesajlar.append(
+                f"  ▫️ Tanker: {int(tanker)} | Konteyner: {int(konteyner)} | Kuru Yük: {int(kuru)}\n"
+            )
+            bulunan += 1
+        else:
+            print(f"{etiket} için eşleşen kayıt bulunamadı.")
 
     if bulunan > 0:
         mesajlar.append(
@@ -82,8 +84,6 @@ def main():
         )
         send_telegram("\n".join(mesajlar))
         print("Telegram mesajı başarıyla iletildi.")
-    else:
-        print("Veri bulunamadığı için mesaj atılmadı.")
 
 
 if __name__ == "__main__":
