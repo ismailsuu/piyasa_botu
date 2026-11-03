@@ -1,10 +1,10 @@
 import os
+import io
 import requests
-import random
+import pandas as pd
 
 BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
-
 
 def send_telegram(mesaj):
     if not BOT_TOKEN or not CHAT_ID:
@@ -24,86 +24,79 @@ def send_telegram(mesaj):
     except Exception as e:
         print("Telegram hatası:", e)
 
-
 def main():
-    # Orijinal IMF PortWatch veritabanı
-    endpoint = "https://services9.arcgis.com/weJ1QsnbMYJlCHdG/arcgis/rest/services/Daily_Chokepoints_Data/FeatureServer/0/query"
+    # Token istemeyen, doğrudan IMF PortWatch resmi açık CSV indirme adresi
+    csv_url = "https://portwatch.imf.org/api/v1/downloads/chokepoints/daily"
 
-    # GitHub Actions IP'sini gizlemek için rastgele bir IP adresi üretiyoruz
-    fake_ip = f"{random.randint(11, 250)}.{random.randint(11, 250)}.{random.randint(11, 250)}.{random.randint(11, 250)}"
-
-    # Sunucuya "Ben IMF'nin kendi web sitesiyim ve normal bir kullanıcıyım" diyen başlıklar
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept": "application/json, text/plain, */*",
-        "Referer": "https://portwatch.imf.org/",
-        "Origin": "https://portwatch.imf.org",
-        "X-Forwarded-For": fake_ip,
-        "X-Real-IP": fake_ip,
-        "Content-Type": "application/x-www-form-urlencoded"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     }
 
+    try:
+        r = requests.get(csv_url, headers=headers, timeout=30)
+        if r.status_code == 200:
+            df = pd.read_csv(io.StringIO(r.text))
+        else:
+            print(f"CSV indirilemedi. HTTP Status: {r.status_code}")
+            return
+    except Exception as e:
+        print(f"Bağlantı hatası: {e}")
+        return
+
+    if df.empty:
+        print("CSV dosyası boş geldi.")
+        return
+
+    # Sütun isimlerini güvenli okuma için küçük harfe çevir
+    df.columns = [str(col).lower() for col in df.columns]
+
+    # Tarihe göre en sondan (en güncelden) geriye sırala
+    if "date" in df.columns:
+        df["date"] = pd.to_datetime(df["date"])
+        df = df.sort_values(by="date", ascending=False)
+
     noktalar = [
-        ("Süveyş Kanalı", ["chokepoint1"]),
-        ("Babülmendep Boğazı", ["chokepoint2"]),
-        ("Hürmüz Boğazı", ["chokepoint3", "chokepoint6"]),
-        ("Ümit Burnu", ["chokepoint5", "chokepoint8"]),
+        ("Süveyş Kanalı", ["suez", "chokepoint1"]),
+        ("Babülmendep Boğazı", ["bab_el_mandeb", "bab el-mandeb", "chokepoint2"]),
+        ("Hürmüz Boğazı", ["hormuz", "chokepoint6", "chokepoint3"]),
+        ("Ümit Burnu", ["cape_of_good_hope", "cape of good hope", "chokepoint8", "chokepoint5"]),
     ]
+
+    # Tablodaki id/isim sütununu bul
+    id_col = next((col for col in ["portid", "chokepoint", "chokepoint_name", "name"] if col in df.columns), None)
+
+    if not id_col:
+        print("CSV dosyasında id/isim sütunu bulunamadı.")
+        print("Mevcut sütunlar:", list(df.columns))
+        return
 
     mesajlar = ["🚢 <b>IMF PortWatch Deniz Trafiği Raporu</b>\n"]
     bulunan = 0
 
-    for etiket, id_listesi in noktalar:
+    for etiket, kelimeler in noktalar:
         kayit = None
-        for pid in id_listesi:
-            # GET yerine POST ile gönderilecek gizli veri paketi
-            payload = {
-                "where": f"portid='{pid}'",
-                "outFields": "*",
-                "orderByFields": "date DESC",
-                "resultRecordCount": 10,
-                "f": "json"
-            }
-            try:
-                # WAF engellerini aşmak için veriyi URL'de (GET) değil gövdede (POST) gönderiyoruz
-                r = requests.post(endpoint, data=payload, headers=headers, timeout=20)
-                
-                # Olası bir HTML/Hata sayfasında kodun çökmesini engelleyen JSON kontrolü
-                try:
-                    data = r.json()
-                except ValueError:
-                    print(f"{etiket} JSON okunamadı. Sunucu yanıtı: {r.status_code} - {r.text[:100]}")
-                    continue
-
-                if "error" in data:
-                    print(f"{etiket} ({pid}) API Hatası:", data["error"].get("message"))
-                    continue
-
-                features = data.get("features", [])
-                if features:
-                    # En güncelden geriye doğru dolu (0'dan büyük) ilk günü al
-                    for f in features:
-                        attr = f.get("attributes", {})
-                        toplam_test = attr.get("n_total") or attr.get("transit_calls") or 0
-                        if toplam_test > 0:
-                            kayit = attr
-                            break
-                    if not kayit:
-                        kayit = features[0].get("attributes", {})
-                    if kayit:
+        for kelime in kelimeler:
+            # Boğaz ismi veya ID'si içeren satırları filtrele
+            filtre = df[df[id_col].astype(str).str.lower().str.contains(kelime)]
+            if not filtre.empty:
+                # Toplam geçişi 0'dan büyük olan ilk güncel satırı al
+                for _, satir in filtre.iterrows():
+                    toplam_test = satir.get("n_total") or satir.get("total_calls") or satir.get("transit_calls") or 0
+                    if pd.notna(toplam_test) and float(toplam_test) > 0:
+                        kayit = satir
                         break
-            except Exception as e:
-                print(f"{etiket} ({pid}) istek hatası:", e)
+                if kayit is not None:
+                    break
 
-        if kayit:
-            toplam = kayit.get("n_total") or kayit.get("transit_calls") or 0
-            tanker = kayit.get("n_tanker") or kayit.get("tanker_calls") or 0
-            konteyner = kayit.get("n_container") or kayit.get("container_calls") or 0
-            kuru = kayit.get("n_dry_bulk") or kayit.get("dry_bulk_calls") or 0
+        if kayit is not None:
+            toplam = kayit.get("n_total") or kayit.get("total_calls") or kayit.get("transit_calls") or 0
+            tanker = kayit.get("n_tanker") or kayit.get("tanker_calls") or kayit.get("tankers") or 0
+            konteyner = kayit.get("n_container") or kayit.get("container_calls") or kayit.get("containers") or 0
+            kuru = kayit.get("n_dry_bulk") or kayit.get("dry_bulk_calls") or kayit.get("cargo_calls") or 0
 
-            mesajlar.append(f"⚓ <b>{etiket}</b> (Toplam: {int(toplam)})")
+            mesajlar.append(f"⚓ <b>{etiket}</b> (Toplam: {int(float(toplam))})")
             mesajlar.append(
-                f"  ▫️ Tanker: {int(tanker)} | Konteyner: {int(konteyner)} | Kuru Yük: {int(kuru)}\n"
+                f"  ▫️ Tanker: {int(float(tanker))} | Konteyner: {int(float(konteyner))} | Kuru Yük: {int(float(kuru))}\n"
             )
             bulunan += 1
         else:
@@ -117,7 +110,6 @@ def main():
         print(f"Başarılı: {bulunan} boğaz Telegram'a iletildi.")
     else:
         print("Kritik: Hiçbir boğazdan kayıt alınamadı.")
-
 
 if __name__ == "__main__":
     main()
