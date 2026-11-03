@@ -272,24 +272,29 @@ else:
 
     @st.cache_data(ttl=3600)
     def load_portwatch_history(pid_list):
-        # API engellerini (403, 404, 499) aşmak için doğrudan açık CSV
-        csv_url = "https://portwatch.imf.org/api/v1/downloads/chokepoints/daily"
+        # 404 hatasını gideren, Dataset ID onaylı ArcGIS Hub Çift Açık Bağlantısı
+        csv_urls = [
+            "https://hub.arcgis.com/api/v3/datasets/3da2b9ca97684916b75c4013f95d18ab_0/downloads/data?format=csv&spatialRefId=4326&where=1%3D1",
+            "https://portwatch.imf.org/api/v3/datasets/3da2b9ca97684916b75c4013f95d18ab_0/downloads/data?format=csv"
+        ]
+        
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         }
         
-        try:
-            r = requests.get(csv_url, headers=headers, timeout=30)
-            if r.status_code == 200:
-                df = pd.read_csv(io.StringIO(r.text))
-            else:
-                st.error(f"Veri indirilemedi. HTTP Status: {r.status_code}")
-                return pd.DataFrame()
-        except Exception as e:
-            st.error(f"Bağlantı hatası: {e}")
-            return pd.DataFrame()
+        df = pd.DataFrame()
+        for url in csv_urls:
+            try:
+                r = requests.get(url, headers=headers, timeout=30)
+                if r.status_code == 200:
+                    df = pd.read_csv(io.StringIO(r.text))
+                    if not df.empty:
+                        break
+            except Exception:
+                continue
 
         if df.empty:
+            st.error("Veri indirilemedi (Sunucu kaynaklı hata veya 404).")
             return pd.DataFrame()
 
         # Sütun isimlerini normalize et
@@ -317,7 +322,11 @@ else:
             df_filtered["n_dry_bulk"] = df_filtered.get("dry_bulk_calls", df_filtered.get("cargo_calls", 0))
 
         if "date" in df_filtered.columns:
-            df_filtered["date"] = pd.to_datetime(df_filtered["date"], errors="coerce")
+            try:
+                df_filtered["date"] = pd.to_datetime(df_filtered["date"], unit="ms")
+            except Exception:
+                df_filtered["date"] = pd.to_datetime(df_filtered["date"], errors="coerce")
+
             df_filtered = df_filtered.dropna(subset=["date"])
             
             # Değerleri sayıya çevir
