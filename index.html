@@ -8,9 +8,6 @@
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#0f172a">
     <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/870/870143.png">
-    
-    <!-- TradingView Kütüphanesi -->
-    <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
 
     <style>
         :root { --bg: #0f172a; --card: #1e293b; --text: #f8fafc; --accent: #3b82f6; --border: #334155; }
@@ -27,24 +24,12 @@
         .pill { background-color: var(--card); border: 1px solid var(--border); color: var(--text); padding: 10px 20px; border-radius: 50px; cursor: pointer; transition: all 0.2s; font-size: 0.9rem; }
         .pill.active { background-color: var(--accent); border-color: var(--accent); }
         
-        /* Bildirim ve Hata Kutusu */
-        #status-box {
-            display: none;
-            padding: 12px;
-            margin-bottom: 15px;
-            border-radius: 8px;
-            text-align: center;
-            font-size: 0.9rem;
-            font-weight: bold;
-        }
-        
         /* Grafik Konteyneri */
         .chart-container { 
             background-color: var(--card); 
             border: 1px solid var(--border); 
             border-radius: 12px; 
-            padding: 10px; 
-            height: calc(100vh - 220px); 
+            height: calc(100vh - 180px); 
             min-height: 400px;
             width: 100%; 
             overflow: hidden;
@@ -55,7 +40,7 @@
 
         @media (max-width: 768px) { 
             body { padding: 15px; } 
-            .chart-container { height: calc(100vh - 190px); } 
+            .chart-container { height: calc(100vh - 150px); } 
         }
     </style>
 </head>
@@ -75,93 +60,55 @@
         <div class="pill" onclick="loadChart('TVC:UKOIL', this)">Brent Petrol</div>
     </div>
 
-    <!-- Durum/Hata Ekranı -->
-    <div id="status-box"></div>
-
     <!-- TradingView Grafiği -->
     <div class="chart-container">
         <div id="tv_chart"></div>
     </div>
 
     <script>
-        // PWA Servis Çalışanını Başlat
+        // PWA Servis Çalışanı
         if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('./sw.js').catch(err => console.log("Servis çalışanı yüklenemedi:", err));
-        }
-
-        let widget = null;
-        const statusBox = document.getElementById('status-box');
-
-        function showMessage(msg, isError = false) {
-            statusBox.style.display = 'block';
-            statusBox.innerText = msg;
-            if (isError) {
-                statusBox.style.backgroundColor = 'rgba(239, 68, 68, 0.1)'; // Kırmızımsı arka plan
-                statusBox.style.color = '#ef4444'; // Kırmızı yazı
-                statusBox.style.border = '1px solid #ef4444';
-            } else {
-                statusBox.style.backgroundColor = 'rgba(59, 130, 246, 0.1)'; // Mavimsi arka plan
-                statusBox.style.color = '#3b82f6'; // Mavi yazı
-                statusBox.style.border = '1px solid #3b82f6';
-            }
-        }
-
-        function hideMessage() {
-            statusBox.style.display = 'none';
+            navigator.serviceWorker.register('./sw.js').catch(err => console.log(err));
         }
 
         function loadChart(symbol, element) {
-            // İnternet bağlantısı kontrolü
-            if (!navigator.onLine) {
-                showMessage("HATA: İnternet bağlantınız yok. Lütfen bağlantınızı kontrol edin.", true);
-                return;
-            }
-
             // Menü aktiflik durumunu güncelle
             document.querySelectorAll('.pill').forEach(el => el.classList.remove('active'));
-            if(element) element.classList.add('active');
+            if (element) element.classList.add('active');
 
             const container = document.getElementById('tv_chart');
-            container.innerHTML = '';
             
-            showMessage("Grafik verileri yükleniyor...");
-
-            // TradingView script'inin (AdBlock vb. yüzünden) engellenip engellenmediğini kontrol et
-            if (typeof TradingView === 'undefined') {
-                showMessage("HATA: TradingView altyapısına ulaşılamıyor. Lütfen Reklam Engelleyiciyi (AdBlock/Brave Shields) kapatıp sayfayı yenileyin.", true);
-                return;
-            }
-
-            try {
-                widget = new TradingView.widget({
-                    "autosize": true,
-                    "symbol": symbol,
-                    "interval": "D",
-                    "timezone": "Europe/Istanbul",
-                    "theme": "dark",
-                    "style": "2",
-                    "locale": "tr",
-                    "enable_publishing": false,
-                    "backgroundColor": "#1e293b",
-                    "gridColor": "#334155",
-                    "hide_top_toolbar": false,
-                    "hide_legend": false,
-                    "save_image": false,
-                    "container_id": "tv_chart"
-                });
-
-                // Widget çalıştıktan kısa bir süre sonra içinde iFrame oluştu mu diye kontrol et
-                setTimeout(() => {
-                    if (container.innerHTML.trim() === '') {
-                        showMessage(`HATA: '${symbol}' verisi alınamadı. Sembol hatalı veya sistem geçici olarak meşgul.`, true);
-                    } else {
-                        hideMessage(); // Sorun yoksa mesaj kutusunu gizle
-                    }
-                }, 1500);
-
-            } catch (err) {
-                showMessage(`KRİTİK HATA: Grafik oluşturulurken sistem çöktü. Detay: ${err.message}`, true);
-            }
+            // 1. Önceki grafiği tamamen yok et
+            container.innerHTML = `
+                <div class="tradingview-widget-container" style="height:100%;width:100%">
+                    <div class="tradingview-widget-container__widget" style="height:100%;width:100%"></div>
+                </div>
+            `;
+            
+            // 2. Yeni script'i dinamik olarak (sıfırdan) oluştur ve enjekte et
+            const script = document.createElement('script');
+            script.type = 'text/javascript';
+            script.src = 'https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js';
+            script.async = true;
+            script.innerHTML = JSON.stringify({
+                "autosize": true,
+                "symbol": symbol,
+                "interval": "D",
+                "timezone": "Europe/Istanbul",
+                "theme": "dark",
+                "style": "2",
+                "locale": "tr",
+                "enable_publishing": false,
+                "backgroundColor": "#1e293b",
+                "gridColor": "#334155",
+                "hide_top_toolbar": false,
+                "hide_legend": false,
+                "save_image": false,
+                "calendar": false,
+                "support_host": "https://www.tradingview.com"
+            });
+            
+            container.querySelector('.tradingview-widget-container').appendChild(script);
         }
 
         // Sayfa açıldığında ilk grafiği yükle
