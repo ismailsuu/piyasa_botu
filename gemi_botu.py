@@ -25,26 +25,29 @@ def send_telegram(mesaj):
         print("Telegram hatası:", e)
 
 def main():
-    # Token istemeyen, doğrudan IMF PortWatch resmi açık CSV indirme adresi
-    csv_url = "https://portwatch.imf.org/api/v1/downloads/chokepoints/daily"
-
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     }
 
-    try:
-        r = requests.get(csv_url, headers=headers, timeout=30)
-        if r.status_code == 200:
-            df = pd.read_csv(io.StringIO(r.text))
-        else:
-            print(f"CSV indirilemedi. HTTP Status: {r.status_code}")
-            return
-    except Exception as e:
-        print(f"Bağlantı hatası: {e}")
-        return
+    # Doğrulanmış ArcGIS Hub CSV İndirme Bağlantıları (Dataset ID: 3da2b9ca97684916b75c4013f95d18ab)
+    csv_urls = [
+        "https://hub.arcgis.com/api/v3/datasets/3da2b9ca97684916b75c4013f95d18ab_0/downloads/data?format=csv&spatialRefId=4326&where=1%3D1",
+        "https://portwatch.imf.org/api/v3/datasets/3da2b9ca97684916b75c4013f95d18ab_0/downloads/data?format=csv"
+    ]
+
+    df = pd.DataFrame()
+    for url in csv_urls:
+        try:
+            r = requests.get(url, headers=headers, timeout=30)
+            if r.status_code == 200:
+                df = pd.read_csv(io.StringIO(r.text))
+                if not df.empty:
+                    break
+        except Exception:
+            continue
 
     if df.empty:
-        print("CSV dosyası boş geldi.")
+        print("Kritik Hata: Veri kaynaklarından geçerli CSV dosyası alınamadı (404/Bağlantı Hatası).")
         return
 
     # Sütun isimlerini güvenli okuma için küçük harfe çevir
@@ -52,7 +55,10 @@ def main():
 
     # Tarihe göre en sondan (en güncelden) geriye sırala
     if "date" in df.columns:
-        df["date"] = pd.to_datetime(df["date"])
+        try:
+            df["date"] = pd.to_datetime(df["date"], unit="ms")
+        except Exception:
+            df["date"] = pd.to_datetime(df["date"], errors="coerce")
         df = df.sort_values(by="date", ascending=False)
 
     noktalar = [
@@ -62,12 +68,10 @@ def main():
         ("Ümit Burnu", ["cape_of_good_hope", "cape of good hope", "chokepoint8", "chokepoint5"]),
     ]
 
-    # Tablodaki id/isim sütununu bul
     id_col = next((col for col in ["portid", "chokepoint", "chokepoint_name", "name"] if col in df.columns), None)
 
     if not id_col:
         print("CSV dosyasında id/isim sütunu bulunamadı.")
-        print("Mevcut sütunlar:", list(df.columns))
         return
 
     mesajlar = ["🚢 <b>IMF PortWatch Deniz Trafiği Raporu</b>\n"]
@@ -77,7 +81,7 @@ def main():
         kayit = None
         for kelime in kelimeler:
             # Boğaz ismi veya ID'si içeren satırları filtrele
-            filtre = df[df[id_col].astype(str).str.lower().str.contains(kelime)]
+            filtre = df[df[id_col].astype(str).str.lower().str.contains(kelime, na=False)]
             if not filtre.empty:
                 # Toplam geçişi 0'dan büyük olan ilk güncel satırı al
                 for _, satir in filtre.iterrows():
