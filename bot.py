@@ -15,9 +15,8 @@ TICKERS = {
     "USD/CNY": "CNY=X",
 }
 
-
 def get_market_summary():
-    lines = ["📊 Piyasa Özeti (Canlı)\n"]
+    lines = ["📊 <b>Piyasa Özeti (Canlı)</b>\n"]
     for label, symbol in TICKERS.items():
         try:
             ticker = yf.Ticker(symbol)
@@ -38,9 +37,7 @@ def get_market_summary():
 
     return "\n".join(lines)
 
-
 def send_telegram(message_text):
-    # Bilgiler artık kod içinde değil, GitHub Secrets üzerinden çekiliyor
     bot_token = os.getenv("TELEGRAM_TOKEN")
     chat_id = os.getenv("TELEGRAM_CHAT_ID")
 
@@ -49,10 +46,13 @@ def send_telegram(message_text):
         return
 
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-    payload = {"chat_id": chat_id, "text": message_text}
+    payload = {
+        "chat_id": chat_id, 
+        "text": message_text,
+        "parse_mode": "HTML"
+    }
     res = requests.post(url, json=payload, timeout=20)
     print("Telegram Yanıtı:", res.status_code, res.text)
-
 
 if __name__ == "__main__":
     report = get_market_summary()
