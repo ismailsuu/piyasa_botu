@@ -135,38 +135,33 @@ app_mode = st.sidebar.radio(
 # ==========================================
 if app_mode == t["market_mode"]:
     TICKERS = {
-        "USD/TRY": "USDTRY=X",
         "Bitcoin (BTC)": "BTC-USD",
         "Altın / Gold (Ons)": "GC=F",
         "Gümüş / Silver (Ons)": "SI=F",
         "Brent Crude": "BZ=F",
         "Natural Gas": "NG=F",
         "Cotton / Pamuk (#2)": "CT=F",
+        "USD/TRY": "USDTRY=X",
         "US 10Y Yield": "^TNX",
         "USD/CNY": "CNY=X",
     }
 
     st.sidebar.markdown("---")
     st.sidebar.header(t["market_settings"])
-
-    # 1. Enstrüman: USD/TRY ilk sırada (index=0)
-    ticker_options = list(TICKERS.keys())
-    selected_label = st.sidebar.selectbox(t["instrument"], ticker_options, index=0)
+    selected_label = st.sidebar.selectbox(t["instrument"], list(TICKERS.keys()))
     selected_ticker = TICKERS[selected_label]
 
     raw_period_values = ["1mo", "6mo", "1y", "3y", "5y", "10y", "max"]
     period_display_map = dict(zip(t["periods"], raw_period_values))
 
-    # 2. Periyot: "1 Ay" / "1 Month" ilk sırada (index=0)
     selected_period_label = st.sidebar.selectbox(
-        t["timeframe"], t["periods"], index=0
+        t["timeframe"], t["periods"], index=5
     )
     selected_period = period_display_map[selected_period_label]
 
-    # 3. Veri Frekansı: "Aylık" / "Monthly" (index=2)
     interval_display_map = dict(zip(t["intervals"], ["1d", "1wk", "1mo"]))
     interval_choice = st.sidebar.radio(
-        t["data_period"], t["intervals"], index=2
+        t["data_period"], t["intervals"], index=0
     )
 
     @st.cache_data(ttl=1800)
@@ -277,6 +272,7 @@ else:
 
     @st.cache_data(ttl=3600)
     def load_portwatch_history(pid_list):
+        # ArcGIS Hub ve PortWatch açık veri uç noktaları
         csv_urls = [
             "https://hub.arcgis.com/api/v3/datasets/3da2b9ca97684916b75c4013f95d18ab_0/downloads/data?format=csv&spatialRefId=4326&where=1%3D1",
             "https://portwatch.imf.org/api/v3/datasets/3da2b9ca97684916b75c4013f95d18ab_0/downloads/data?format=csv"
@@ -300,18 +296,21 @@ else:
         if df.empty:
             return pd.DataFrame()
 
+        # Sütun isimlerini normalize et
         df.columns = [str(col).lower().strip() for col in df.columns]
 
         id_col = next((col for col in ["portid", "chokepoint", "chokepoint_name", "name"] if col in df.columns), None)
         if not id_col:
             return pd.DataFrame()
 
+        # Boğaz ID'si veya İsmine göre filtrele
         mask = df[id_col].astype(str).str.lower().apply(lambda x: any(pid in x for pid in pid_list))
         df_filtered = df[mask].copy()
 
         if df_filtered.empty:
             return pd.DataFrame()
 
+        # Sütun uyumlulukları
         if "n_total" not in df_filtered.columns:
             df_filtered["n_total"] = df_filtered.get("transit_calls", df_filtered.get("total_calls", 0))
         if "n_tanker" not in df_filtered.columns:
@@ -329,6 +328,7 @@ else:
 
             df_filtered = df_filtered.dropna(subset=["date"])
             
+            # Değerleri sayıya çevir
             cols_to_numeric = ["n_total", "n_tanker", "n_container", "n_dry_bulk"]
             for col in cols_to_numeric:
                 if col in df_filtered.columns:
