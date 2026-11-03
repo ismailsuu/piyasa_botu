@@ -1,4 +1,4 @@
-name: Otomatik Piyasa Bildirimi
+name: Otomatik Piyasa ve Deniz Trafiği Bildirimi
 
 on:
   schedule:
@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  market-job:
+  market-and-marine-job:
     runs-on: ubuntu-latest
     steps:
       - name: Depoyu Al
@@ -24,10 +24,16 @@ jobs:
       - name: Paketleri Yükle
         run: pip install -r requirements.txt
 
-      - name: Raporu Çalıştır ve Gönder
+      - name: Finansal Piyasa Raporu Gönder (bot.py)
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: |
-          python bot.py || true
-          python gemi_botu.py || true
+        run: python bot.py
+        continue-on-error: true
+
+      - name: Deniz Trafiği Raporu Gönder (gemi_botu.py)
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python gemi_botu.py
+        continue-on-error: true
