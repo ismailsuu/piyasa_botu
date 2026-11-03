@@ -25,8 +25,8 @@ def send_telegram(mesaj):
 
 
 def main():
-    # Süveyş'i getiren çalışan ArcGIS servisi
-    endpoint = "https://services9.arcgis.com/weJ1QsnbMYJlCHdG/arcgis/rest/services/Daily_Chokepoints_Data/FeatureServer/0/query"
+    # Güncel ve doğrulanmış IMF PortWatch API endpoint'i
+    endpoint = "https://services9.arcgis.com/fqDgCAUbok0cvzq7/arcgis/rest/services/PortWatch_Chokepoints_Daily_Transit_Data/FeatureServer/0/query"
 
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -34,59 +34,59 @@ def main():
     }
 
     noktalar = [
-        ("Süveyş Kanalı", ["chokepoint1"]),
-        ("Babülmendep Boğazı", ["chokepoint2"]),
-        ("Hürmüz Boğazı", ["chokepoint3", "chokepoint6"]),
-        ("Ümit Burnu", ["chokepoint5", "chokepoint8"]),
+        ("Süveyş Kanalı", "suez"),
+        ("Babülmendep Boğazı", "bab_el_mandeb"),
+        ("Hürmüz Boğazı", "hormuz"),
+        ("Ümit Burnu", "cape_of_good_hope"),
     ]
 
     mesajlar = ["🚢 <b>IMF PortWatch Deniz Trafiği Raporu</b>\n"]
     bulunan = 0
 
-    for etiket, idler in noktalar:
-        kayit = None
-        for pid in idler:
-            params = {
-                "where": f"portid='{pid}' AND n_total > 0",
-                "outFields": "date,n_total,n_tanker,n_container,n_dry_bulk",
-                "orderByFields": "date DESC",
-                "resultRecordCount": 1,
-                "f": "json",
-            }
-            try:
-                r = requests.get(endpoint, params=params, headers=headers, timeout=15)
-                if r.status_code == 200:
-                    data = r.json()
-                    fts = data.get("features", [])
-                    if fts:
-                        kayit = fts[0].get("attributes", {})
-                        break
-            except Exception as e:
-                print(f"{etiket} ({pid}) hatası:", e)
+    for etiket, ch_name in noktalar:
+        # PortWatch açık katmanında doğrudan boğaz ismi (küçük harfle) sorgulanır
+        params = {
+            "where": f"chokepoint='{ch_name}' OR portid='{ch_name}'",
+            "outFields": "*",
+            "orderByFields": "date DESC",
+            "resultRecordCount": 1,
+            "f": "json",
+        }
 
-        if kayit:
-            toplam = kayit.get("n_total") or 0
-            tanker = kayit.get("n_tanker") or 0
-            konteyner = kayit.get("n_container") or 0
-            kuru = kayit.get("n_dry_bulk") or 0
+        try:
+            r = requests.get(endpoint, params=params, headers=headers, timeout=15)
+            data = r.json()
 
-            mesajlar.append(f"⚓ <b>{etiket}</b> (Toplam: {int(toplam)})")
-            mesajlar.append(
-                f"  ▫️ Tanker: {int(tanker)} | Konteyner: {int(konteyner)} | Kuru Yük: {int(kuru)}\n"
-            )
-            bulunan += 1
-        else:
-            print(f"{etiket} için kayıt bulunamadı.")
+            if "error" in data:
+                print(f"{etiket} Sunucu Hatası:", data["error"].get("message"))
+                continue
 
-    # En az 1 boğaz bile gelse Telegram'a ilet
+            fts = data.get("features", [])
+            if fts:
+                attr = fts[0].get("attributes", {})
+                toplam = attr.get("n_total") or attr.get("transit_calls") or 0
+                tanker = attr.get("n_tanker") or attr.get("tanker_calls") or 0
+                konteyner = attr.get("n_container") or attr.get("container_calls") or 0
+                kuru = attr.get("n_dry_bulk") or attr.get("dry_bulk_calls") or 0
+
+                mesajlar.append(f"⚓ <b>{etiket}</b> (Toplam: {int(toplam)})")
+                mesajlar.append(
+                    f"  ▫️ Tanker: {int(tanker)} | Konteyner: {int(konteyner)} | Kuru Yük: {int(kuru)}\n"
+                )
+                bulunan += 1
+            else:
+                print(f"{etiket} için {ch_name} ile kayıt bulunamadı.")
+        except Exception as e:
+            print(f"{etiket} istek hatası:", e)
+
     if bulunan > 0:
         mesajlar.append(
             "📊 <b>Detaylı Grafikler ve Canlı Panel:</b>\n👉 https://ismail-piyasa.streamlit.app/"
         )
         send_telegram("\n".join(mesajlar))
-        print(f"{bulunan} boğaz Telegram'a iletildi.")
+        print(f"{bulunan} boğaz bilgisi başarıyla Telegram'a iletildi.")
     else:
-        print("Hiçbir boğazdan veri alınamadı.")
+        print("Hiçbir boğazdan geçerli kayıt alınamadı.")
 
 
 if __name__ == "__main__":
