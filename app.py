@@ -113,7 +113,7 @@ LANG = {
     },
 }
 
-# --- HEM YAN MENÜYE HEM ANA EKRANA DİL SEÇİMİ ---
+# --- DİL SEÇİMİ ---
 lang_col1, lang_col2 = st.columns([8, 2])
 with lang_col2:
     selected_lang = st.selectbox("🌐 Dil / Language", ["Türkçe 🇹🇷", "English 🇬🇧"], index=0)
@@ -269,60 +269,38 @@ else:
         index=3,
     )
 
-    @st.cache_data(ttl=1800)
+    @st.cache_data(ttl=3600)
     def load_portwatch_history(pid):
-        # GÜNCEL VE DOĞRULANMIŞ IMF PORTWATCH REST QUERY ENDPOINT'İ
-        endpoint = "https://services9.arcgis.com/fqDgCAUbok0cvzq7/arcgis/rest/services/PortWatch_Chokepoints_Daily_Transit_Data/FeatureServer/0/query"
+        # IMF PortWatch Resmi ve Çalışan Endpoint'i
+        endpoint = "https://services9.arcgis.com/weJ1QsnbMYJlCHdG/arcgis/rest/services/Daily_Chokepoints_Data/FeatureServer/0/query"
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Accept": "application/json",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         }
 
-        tum_kayitlar = []
-        offset = 0
+        # Tek istekte en güncel 2000 kaydı (yaklaşık 5.5 yıllık veri) alır, döngü takılmasını önler
+        params = {
+            "where": f"portid='{pid}'",
+            "outFields": "date,n_total,n_tanker,n_container,n_dry_bulk",
+            "orderByFields": "date desc",
+            "resultRecordCount": 2000,
+            "f": "json",
+        }
 
-        while True:
-            params = {
-                "where": f"portid='{pid}'",
-                "outFields": "*",
-                "orderByFields": "date desc",
-                "resultOffset": offset,
-                "resultRecordCount": 1000,
-                "f": "json",
-            }
-            try:
-                r = requests.get(endpoint, params=params, headers=headers, timeout=20)
-                if r.status_code == 200:
-                    data = r.json()
-                    features = data.get("features", [])
-                    if not features:
-                        break
-                    tum_kayitlar.extend([f["attributes"] for f in features])
-                    if len(features) < 1000:
-                        break
-                    offset += len(features)
-                else:
-                    break
-            except Exception:
-                break
-
-        if tum_kayitlar:
-            df = pd.DataFrame(tum_kayitlar)
-
-            # Sütun adı uyumluluk kontrolleri
-            if "n_total" not in df.columns:
-                df["n_total"] = df.get("transit_calls", df.get("total_calls", 0))
-            if "n_tanker" not in df.columns:
-                df["n_tanker"] = df.get("tanker_calls", df.get("tankers", 0))
-            if "n_container" not in df.columns:
-                df["n_container"] = df.get("container_calls", df.get("containers", 0))
-            if "n_dry_bulk" not in df.columns:
-                df["n_dry_bulk"] = df.get("dry_bulk_calls", df.get("cargo_calls", 0))
-
-            if "date" in df.columns:
-                df["date"] = pd.to_datetime(df["date"], unit="ms")
-                df = df.sort_values("date").reset_index(drop=True)
-                return df
+        try:
+            r = requests.get(endpoint, params=params, headers=headers, timeout=20)
+            if r.status_code == 200:
+                data = r.json()
+                features = data.get("features", [])
+                if features:
+                    records = [f["attributes"] for f in features]
+                    df = pd.DataFrame(records)
+                    if "date" in df.columns:
+                        df["date"] = pd.to_datetime(df["date"], unit="ms")
+                        # Sadece veri olan (n_total > 0) günleri sıralar
+                        df = df[df["n_total"] > 0].sort_values("date").reset_index(drop=True)
+                        return df
+        except Exception as e:
+            st.error(f"Bağlantı hatası: {e}")
 
         return pd.DataFrame()
 
