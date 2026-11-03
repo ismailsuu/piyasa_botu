@@ -117,7 +117,7 @@
     <script>
         // PWA Servis Çalışanını Başlat
         if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('./sw.js');
+            navigator.serviceWorker.register('./sw.js').catch(err => console.log(err));
         }
 
         let globalData = [];
@@ -130,25 +130,43 @@
             'Ümit Burnu': 'chokepoint8'
         };
 
-        // İstek istemci (lokal cihaz) üzerinden gittiği için WAF engeline takılmaz
+        // CORS güvenlik engellerini aşmak için proxy rotaları (Sırayla dener)
         async function loadData() {
-            const url = "https://hub.arcgis.com/api/v3/datasets/3da2b9ca97684916b75c4013f95d18ab_0/downloads/data?format=csv";
+            const targetUrl = encodeURIComponent("https://hub.arcgis.com/api/v3/datasets/3da2b9ca97684916b75c4013f95d18ab_0/downloads/data?format=csv");
             
-            fetch(url)
-                .then(response => response.text())
-                .then(csvText => {
-                    Papa.parse(csvText, {
-                        header: true,
-                        dynamicTyping: true,
-                        complete: function(results) {
-                            globalData = results.data;
-                            document.getElementById('loader').style.display = 'none';
-                            changeStrait('Süveyş Kanalı'); 
+            const proxies = [
+                `https://api.allorigins.win/raw?url=${targetUrl}`,
+                `https://corsproxy.io/?${targetUrl}`
+            ];
+
+            for (let url of proxies) {
+                try {
+                    let response = await fetch(url);
+                    if (response.ok) {
+                        let csvText = await response.text();
+                        
+                        // Hata sayfası döndüyse atla
+                        if (csvText.trim().startsWith("<") || !csvText.toLowerCase().includes("date")) {
+                            continue;
                         }
-                    });
-                }).catch(err => {
-                    document.getElementById('loader').innerText = "Bağlantı hatası! Lütfen internetinizi kontrol edin.";
-                });
+
+                        Papa.parse(csvText, {
+                            header: true,
+                            dynamicTyping: true,
+                            complete: function(results) {
+                                globalData = results.data;
+                                document.getElementById('loader').style.display = 'none';
+                                changeStrait('Süveyş Kanalı'); 
+                            }
+                        });
+                        return; // Başarılı olunca döngüden çık
+                    }
+                } catch (err) {
+                    console.log("Proxy başarısız: " + url);
+                }
+            }
+            
+            document.getElementById('loader').innerText = "Veri çekilemedi. Tarayıcı veya internet güvenlik ayarlarınızı kontrol edin.";
         }
 
         function changeStrait(straitName) {
@@ -212,7 +230,7 @@
                 },
                 options: {
                     responsive: true,
-                    maintainAspectRatio: false, // Mobilde ekranı taşmasını engeller
+                    maintainAspectRatio: false,
                     plugins: { legend: { display: false } },
                     scales: {
                         y: { grid: { color: '#334155' }, ticks: { color: '#94a3b8' } },
