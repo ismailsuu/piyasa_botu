@@ -25,7 +25,6 @@ def send_telegram(mesaj):
 
 
 def main():
-    # IMF PortWatch Resmi ArcGIS Endpoint'i
     endpoint = "https://services9.arcgis.com/weJ1QsnbMYJlCHdG/arcgis/rest/services/Daily_Chokepoints_Data/FeatureServer/0/query"
 
     headers = {
@@ -44,7 +43,7 @@ def main():
     bulunan = 0
 
     for pid, etiket in noktalar:
-        # n_total > 0 şartı sayesinde boş/işlenmemiş son günleri atlayıp dolu en son günü alır
+        # n_total > 0 şartı: Henüz verisi işlenmemiş boş günleri atlar, verisi olan en güncel günü getirir
         params = {
             "where": f"portid='{pid}' AND n_total > 0",
             "outFields": "date,n_total,n_tanker,n_container,n_dry_bulk",
@@ -71,7 +70,7 @@ def main():
                     )
                     bulunan += 1
                 else:
-                    print(f"{etiket} için n_total > 0 şartına uyan kayıt dönmedi.")
+                    print(f"{etiket} için n_total > 0 olan kayıt bulunamadı.")
             else:
                 print(f"{etiket} HTTP Hatası: {r.status_code}")
         except Exception as e:
@@ -82,9 +81,9 @@ def main():
             "📊 <b>Detaylı Grafikler ve Canlı Panel:</b>\n👉 https://ismail-piyasa.streamlit.app/"
         )
         send_telegram("\n".join(mesajlar))
-        print("Telegram mesajı başarıyla gönderildi!")
+        print("Telegram mesajı başarıyla iletildi.")
     else:
-        print("Kayıt bulunamadığı için mesaj atılmadı.")
+        print("Veri bulunamadığı için mesaj atılmadı.")
 
 
 if __name__ == "__main__":
