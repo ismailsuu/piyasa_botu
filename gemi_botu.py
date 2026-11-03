@@ -1,5 +1,4 @@
 import os
-import pandas as pd
 import requests
 
 BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
@@ -26,87 +25,73 @@ def send_telegram(mesaj):
 
 
 def main():
-    # Token istemeyen doğrudan açık veri CSV kaynağı
-    csv_url = "https://raw.githubusercontent.com/datasets/portwatch-chokepoints/main/daily_chokepoints.csv"
-    fallback_url = "https://services9.arcgis.com/weJ1QsnbMYJlCHdG/arcgis/rest/services/Daily_Chokepoints_Data/FeatureServer/0/query?where=1%3D1&outFields=*&f=json&resultRecordCount=1000"
+    # Token istemeyen, halka açık güncel PortWatch transit servisi
+    endpoint = "https://services9.arcgis.com/fqDgCAUbok0cvzq7/arcgis/rest/services/PortWatch_Chokepoints_Daily_Transit_Data/FeatureServer/0/query"
 
-    print("--- Veri Çekiliyor ---")
-    df = None
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "application/json",
+    }
 
-    # 1. Öncelik: Hızlı ve engelsiz açık CSV
-    try:
-        df = pd.read_csv(csv_url)
-        print("CSV kaynağından veri başarıyla alındı.")
-    except Exception as e:
-        print("CSV alınamadı, alternatif deneniyor:", e)
-
-    # 2. Alternatif: IMF PortWatch açık API aynası
-    if df is None or df.empty:
-        try:
-            headers = {"User-Agent": "Mozilla/5.0"}
-            r = requests.get(fallback_url, headers=headers, timeout=20)
-            data = r.json()
-            features = data.get("features", [])
-            if features:
-                records = [f["attributes"] for f in features]
-                df = pd.DataFrame(records)
-                print("Alternatif API kaynağından veri alındı.")
-        except Exception as e:
-            print("Alternatif kaynak hatası:", e)
-
-    if df is None or df.empty:
-        print("Veri kaynağına ulaşılamadı.")
-        return
-
-    # Sütun isimlerini küçük harfe çekerek standartlaştır
-    df.columns = [c.lower() for c in df.columns]
-
-    # Tarihe göre en güncelden eskiye sırala
-    if "date" in df.columns:
-        df["date"] = pd.to_datetime(df["date"])
-        df = df.sort_values("date", ascending=False)
-
+    # IMF PortWatch tablosunda kayıtlı metin adları ve ID'ler
     noktalar = [
-        ("Süveyş Kanalı", ["chokepoint1", "suez"]),
-        ("Babülmendep Boğazı", ["chokepoint2", "bab_el_mandeb", "mandeb"]),
-        ("Hürmüz Boğazı", ["chokepoint6", "chokepoint3", "hormuz"]),
-        ("Ümit Burnu", ["chokepoint8", "chokepoint5", "cape_of_good_hope"]),
+        ("Süveyş Kanalı", ["Suez Canal", "suez", "chokepoint1"]),
+        ("Babülmendep Boğazı", ["Bab el-Mandeb", "Bab el-Mandeb Strait", "bab_el_mandeb", "chokepoint2"]),
+        ("Hürmüz Boğazı", ["Strait of Hormuz", "Hormuz", "hormuz", "chokepoint6", "chokepoint3"]),
+        ("Ümit Burnu", ["Cape of Good Hope", "cape_of_good_hope", "chokepoint8", "chokepoint5"]),
     ]
 
     mesajlar = ["🚢 <b>IMF PortWatch Deniz Trafiği Raporu</b>\n"]
     bulunan = 0
 
-    id_col = "portid" if "portid" in df.columns else ("chokepoint" if "chokepoint" in df.columns else None)
+    for etiket, filtreler in noktalar:
+        kayit = None
+        for term in filtreler:
+            # Hem isim (chokepoint_name/name) hem kod (chokepoint/portid) alanlarında arar
+            where_clause = (
+                f"(chokepoint_name='{term}' OR name='{term}' OR "
+                f"chokepoint='{term}' OR portid='{term}') AND (n_total > 0 OR transit_calls > 0)"
+            )
+            params = {
+                "where": where_clause,
+                "outFields": "*",
+                "orderByFields": "date DESC",
+                "resultRecordCount": 1,
+                "f": "json",
+            }
+            try:
+                r = requests.get(endpoint, params=params, headers=headers, timeout=15)
+                if r.status_code == 200:
+                    data = r.json()
+                    features = data.get("features", [])
+                    if features:
+                        kayit = features[0].get("attributes", {})
+                        break
+            except Exception:
+                pass
 
-    for etiket, anahtarlar in noktalar:
-        satir = None
-        if id_col:
-            for k in anahtarlar:
-                alt_df = df[df[id_col].astype(str).str.lower() == k.lower()]
-                if not alt_df.empty:
-                    satir = alt_df.iloc[0]
-                    break
-
-        if satir is not None:
-            toplam = satir.get("n_total") or satir.get("transit_calls") or 0
-            tanker = satir.get("n_tanker") or satir.get("tanker_calls") or 0
-            konteyner = satir.get("n_container") or satir.get("container_calls") or 0
-            kuru = satir.get("n_dry_bulk") or satir.get("dry_bulk_calls") or 0
+        if kayit:
+            toplam = kayit.get("n_total") or kayit.get("transit_calls") or kayit.get("total_calls") or 0
+            tanker = kayit.get("n_tanker") or kayit.get("tanker_calls") or kayit.get("tankers") or 0
+            konteyner = kayit.get("n_container") or kayit.get("container_calls") or kayit.get("containers") or 0
+            kuru = kayit.get("n_dry_bulk") or kayit.get("dry_bulk_calls") or kayit.get("cargo_calls") or 0
 
             mesajlar.append(f"⚓ <b>{etiket}</b> (Toplam: {int(toplam)})")
             mesajlar.append(
                 f"  ▫️ Tanker: {int(tanker)} | Konteyner: {int(konteyner)} | Kuru Yük: {int(kuru)}\n"
             )
             bulunan += 1
+        else:
+            print(f"{etiket} için kayıt bulunamadı.")
 
     if bulunan > 0:
         mesajlar.append(
             "📊 <b>Detaylı Grafikler ve Canlı Panel:</b>\n👉 https://ismail-piyasa.streamlit.app/"
         )
         send_telegram("\n".join(mesajlar))
-        print(f"Başarılı: {bulunan} boğaz Telegram'a gönderildi.")
+        print(f"Başarılı: {bulunan} boğaz Telegram'a iletildi.")
     else:
-        print("Boğazlar filtrelenemedi.")
+        print("Boğaz verisi çekilemedi.")
 
 
 if __name__ == "__main__":
