@@ -269,17 +269,26 @@ else:
         index=3,
     )
 
-    @st.cache_data(ttl=3600)
+    @st.cache_data(ttl=1800)
     def load_portwatch_history(pid):
-        # IMF PortWatch Resmi ve Çalışan Endpoint'i
         endpoint = "https://services9.arcgis.com/weJ1QsnbMYJlCHdG/arcgis/rest/services/Daily_Chokepoints_Data/FeatureServer/0/query"
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         }
 
-        # Tek istekte en güncel 2000 kaydı (yaklaşık 5.5 yıllık veri) alır, döngü takılmasını önler
+        # Olası portid alternatifleri (Hürmüz için chokepoint6/chokepoint3, Ümit Burnu için chokepoint8/chokepoint5 vb.)
+        id_map = {
+            "chokepoint1": ["chokepoint1", "suez"],
+            "chokepoint2": ["chokepoint2", "bab_el_mandeb"],
+            "chokepoint6": ["chokepoint6", "chokepoint3", "hormuz"],
+            "chokepoint8": ["chokepoint8", "chokepoint5", "cape_of_good_hope"],
+        }
+        gecerli_idler = id_map.get(pid, [pid])
+        id_sorgusu = " OR ".join([f"portid='{x}'" for x in gecerli_idler])
+
+        # En son işlenmiş 2000 dolu kaydı tek seferde çeker
         params = {
-            "where": f"portid='{pid}'",
+            "where": f"({id_sorgusu}) AND n_total > 0",
             "outFields": "date,n_total,n_tanker,n_container,n_dry_bulk",
             "orderByFields": "date desc",
             "resultRecordCount": 2000,
@@ -296,8 +305,7 @@ else:
                     df = pd.DataFrame(records)
                     if "date" in df.columns:
                         df["date"] = pd.to_datetime(df["date"], unit="ms")
-                        # Sadece veri olan (n_total > 0) günleri sıralar
-                        df = df[df["n_total"] > 0].sort_values("date").reset_index(drop=True)
+                        df = df.sort_values("date").reset_index(drop=True)
                         return df
         except Exception as e:
             st.error(f"Bağlantı hatası: {e}")
