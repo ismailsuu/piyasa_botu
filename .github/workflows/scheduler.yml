@@ -28,5 +28,6 @@ jobs:
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python bot.py && python gemi_botu.py
-        
+        run: |
+          python bot.py || true
+          python gemi_botu.py || true
