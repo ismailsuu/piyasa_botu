@@ -44,10 +44,10 @@ LANG = {
         "marine_settings": "⚓ Deniz Trafiği Ayarları",
         "strait": "Boğaz / Geçit",
         "chokepoints": {
-            "Süveyş Kanalı": "suez",
-            "Babülmendep Boğazı": "bab_el_mandeb",
-            "Hürmüz Boğazı": "hormuz",
-            "Ümit Burnu": "cape_of_good_hope",
+            "Süveyş Kanalı": "chokepoint1",
+            "Babülmendep Boğazı": "chokepoint2",
+            "Hürmüz Boğazı": "chokepoint6",
+            "Ümit Burnu": "chokepoint8",
         },
         "time_ranges": ["Son 1 Yıl", "Son 3 Yıl", "Son 5 Yıl", "Tüm Geçmiş (2019 - Günümüz)"],
         "spinner_text": "Tüm veri arşivi yükleniyor...",
@@ -91,10 +91,10 @@ LANG = {
         "marine_settings": "⚓ Maritime Settings",
         "strait": "Chokepoint / Strait",
         "chokepoints": {
-            "Suez Canal": "suez",
-            "Bab el-Mandeb Strait": "bab_el_mandeb",
-            "Strait of Hormuz": "hormuz",
-            "Cape of Good Hope": "cape_of_good_hope",
+            "Suez Canal": "chokepoint1",
+            "Bab el-Mandeb Strait": "chokepoint2",
+            "Strait of Hormuz": "chokepoint6",
+            "Cape of Good Hope": "chokepoint8",
         },
         "time_ranges": ["Last 1 Year", "Last 3 Years", "Last 5 Years", "All History (2019 - Present)"],
         "spinner_text": "Loading historical archive...",
@@ -271,27 +271,19 @@ else:
 
     @st.cache_data(ttl=1800)
     def load_portwatch_history(pid):
-        # DOĞRULANMIŞ GÜNCEL IMF PORTWATCH ENDPOINT'İ
+        # GÜNCEL VE DOĞRULANMIŞ IMF PORTWATCH REST QUERY ENDPOINT'İ
         endpoint = "https://services9.arcgis.com/fqDgCAUbok0cvzq7/arcgis/rest/services/PortWatch_Chokepoints_Daily_Transit_Data/FeatureServer/0/query"
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "application/json",
         }
-
-        # Eski ID kodlarıyla yeni isimler arasında tam eşleme
-        legacy_map = {
-            "suez": "chokepoint1",
-            "bab_el_mandeb": "chokepoint2",
-            "hormuz": "chokepoint6",
-            "cape_of_good_hope": "chokepoint8",
-        }
-        alt_id = legacy_map.get(pid, pid)
 
         tum_kayitlar = []
         offset = 0
 
         while True:
             params = {
-                "where": f"chokepoint='{pid}' OR portid='{pid}' OR portid='{alt_id}'",
+                "where": f"portid='{pid}'",
                 "outFields": "*",
                 "orderByFields": "date desc",
                 "resultOffset": offset,
@@ -316,8 +308,8 @@ else:
 
         if tum_kayitlar:
             df = pd.DataFrame(tum_kayitlar)
-            
-            # Kolon ismi eşitlemeleri
+
+            # Sütun adı uyumluluk kontrolleri
             if "n_total" not in df.columns:
                 df["n_total"] = df.get("transit_calls", df.get("total_calls", 0))
             if "n_tanker" not in df.columns:
