@@ -135,8 +135,8 @@ app_mode = st.sidebar.radio(
 if app_mode == t["market_mode"]:
     TICKERS = {
         "Bitcoin (BTC)": "BTC-USD",
-        "Gold / Altın (Ons)": "GC=F",
-        "Silver / Gümüş (Ons)": "SI=F",
+        "Altın / Gold (Ons)": "GC=F",
+        "Gümüş / Silver (Ons)": "SI=F",
         "Brent Crude": "BZ=F",
         "Natural Gas": "NG=F",
         "Cotton / Pamuk (#2)": "CT=F",
@@ -271,32 +271,49 @@ else:
 
     @st.cache_data(ttl=3600)
     def load_portwatch_history(pid):
-        endpoint = "https://services9.arcgis.com/weJ1QsnbMYJlCHdG/arcgis/rest/services/Daily_Chokepoints_Data/FeatureServer/0/query"
+        # IMF PortWatch halka açık, token istemeyen güncel katman
+        endpoint = "https://services9.arcgis.com/fqDgCAUbok0cvzq7/arcgis/rest/services/PortWatch_Chokepoints_Daily_Transit_Data/FeatureServer/0/query"
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             "Accept": "application/json",
         }
 
-        # Sunucuyu yormayan hızlı ve doğrudan sorgu (Timeout önleme)
+        # Token gerektirmeyen tekil sorgu
         params = {
-            "where": f"portid='{pid}' AND n_total > 0",
-            "outFields": "date,n_total,n_tanker,n_container,n_dry_bulk",
+            "where": f"portid='{pid}'",
+            "outFields": "*",
             "orderByFields": "date desc",
-            "resultRecordCount": 500,  # Hızlı yanıt için optimize edildi
+            "resultRecordCount": 1000,
             "f": "json",
         }
 
         try:
-            r = requests.get(endpoint, params=params, headers=headers, timeout=35)
+            r = requests.get(endpoint, params=params, headers=headers, timeout=25)
             if r.status_code == 200:
                 data = r.json()
                 features = data.get("features", [])
                 if features:
                     records = [f["attributes"] for f in features]
                     df = pd.DataFrame(records)
+
+                    # Sütun adı uyumlulukları
+                    if "n_total" not in df.columns:
+                        df["n_total"] = df.get("transit_calls", df.get("total_calls", 0))
+                    if "n_tanker" not in df.columns:
+                        df["n_tanker"] = df.get("tanker_calls", df.get("tankers", 0))
+                    if "n_container" not in df.columns:
+                        df["n_container"] = df.get("container_calls", df.get("containers", 0))
+                    if "n_dry_bulk" not in df.columns:
+                        df["n_dry_bulk"] = df.get("dry_bulk_calls", df.get("cargo_calls", 0))
+
                     if "date" in df.columns:
-                        df["date"] = pd.to_datetime(df["date"], unit="ms")
-                        df = df.sort_values("date").reset_index(drop=True)
+                        try:
+                            df["date"] = pd.to_datetime(df["date"], unit="ms")
+                        except Exception:
+                            df["date"] = pd.to_datetime(df["date"])
+
+                        # Sadece geçerli veri olan günleri al
+                        df = df[df["n_total"] > 0].sort_values("date").reset_index(drop=True)
                         return df
         except Exception as e:
             st.error(f"Bağlantı hatası: {e}")
