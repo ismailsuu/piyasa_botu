@@ -1,7 +1,6 @@
 import os
 import requests
 
-# Değerleri GitHub Secrets üzerinden çekiyoruz
 BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
@@ -18,12 +17,15 @@ def send_telegram(mesaj):
         "parse_mode": "HTML",
         "disable_web_page_preview": True,
     }
-    res = requests.post(url, json=payload, timeout=15)
-    print("Telegram Yanıtı:", res.status_code, res.text)
+    try:
+        res = requests.post(url, json=payload, timeout=15)
+        print("Telegram Yanıtı:", res.status_code, res.text)
+    except Exception as e:
+        print("Telegram gönderim hatası:", e)
 
 
 def main():
-    # GÜNCEL IMF PORTWATCH ENDPOINT'İ (fqDgCAUbok0cvzq7)
+    # GÜNCEL IMF PORTWATCH ENDPOINT'İ
     endpoint = "https://services9.arcgis.com/fqDgCAUbok0cvzq7/arcgis/rest/services/Daily_Chokepoints_Data/FeatureServer/0/query"
 
     headers = {
@@ -33,36 +35,38 @@ def main():
         "Accept": "application/json",
     }
 
-    # Güncel katmanda hem portid hem chokepoint adlandırması desteklenir
+    # Boğazların tüm olası ID ve ad varyasyonları
     noktalar = [
-        ("suez", "Süveyş Kanalı"),
-        ("bab_el_mandeb", "Babülmendep Boğazı"),
-        ("hormuz", "Hürmüz Boğazı"),
-        ("cape_of_good_hope", "Ümit Burnu"),
+        ("Süveyş Kanalı", ["suez", "chokepoint1", "Suez Canal"]),
+        ("Babülmendep Boğazı", ["bab_el_mandeb", "chokepoint2", "Bab el-Mandeb Strait", "mandeb"]),
+        ("Hürmüz Boğazı", ["hormuz", "chokepoint6", "Strait of Hormuz"]),
+        ("Ümit Burnu", ["cape_of_good_hope", "chokepoint8", "Cape of Good Hope"]),
     ]
 
     mesajlar = ["🚢 <b>IMF PortWatch Deniz Trafiği Raporu</b>\n"]
     bulunan = 0
 
-    for ch_name, etiket in noktalar:
-        # Hem yeni 'chokepoint' alanını hem de eski 'portid' alanını kapsayacak where filtresi
+    for etiket, anahtarlar in noktalar:
+        # Alan adı ve ID değişikliklerine karşı esnek sorgu
+        sartlar = []
+        for k in anahtarlar:
+            sartlar.append(f"chokepoint='{k}'")
+            sartlar.append(f"portid='{k}'")
+            sartlar.append(f"port_name='{k}'")
+        where_query = " OR ".join(sartlar)
+
         params = {
-            "where": f"chokepoint='{ch_name}' OR portid='{ch_name}'",
+            "where": where_query,
             "outFields": "*",
             "orderByFields": "date desc",
             "resultRecordCount": 1,
             "f": "json",
         }
+
         try:
             r = requests.get(endpoint, params=params, headers=headers, timeout=15)
             if r.status_code == 200:
                 data = r.json()
-                
-                # API hata mesajı döndüyse yazdır
-                if "error" in data:
-                    print(f"{etiket} API Hatası:", data["error"].get("message"))
-                    continue
-
                 features = data.get("features", [])
                 if features:
                     attr = features[0].get("attributes", {})
@@ -98,7 +102,7 @@ def main():
                     )
                     bulunan += 1
                 else:
-                    print(f"{etiket} için veri bulunamadı (boş döndü).")
+                    print(f"{etiket} boş döndü.")
             else:
                 print(f"{etiket} HTTP Hatası: {r.status_code}")
         except Exception as e:
@@ -110,7 +114,7 @@ def main():
         )
         send_telegram("\n".join(mesajlar))
     else:
-        print("Hiçbir noktadan veri çekilemedi.")
+        print("HATA: Hiçbir boğazdan veri alınamadığı için Telegram mesajı atılmadı.")
 
 
 if __name__ == "__main__":
