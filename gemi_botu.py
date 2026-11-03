@@ -25,7 +25,6 @@ def send_telegram(mesaj):
 
 
 def main():
-    # Güncel ve geçerli IMF PortWatch Chokepoint Servis URL'si
     endpoint = "https://services9.arcgis.com/fqDgCAUbok0cvzq7/arcgis/rest/services/PortWatch_Chokepoints_Daily_Transit_Data/FeatureServer/0/query"
 
     headers = {
@@ -34,18 +33,19 @@ def main():
     }
 
     noktalar = [
-        ("suez", "Süveyş Kanalı"),
-        ("bab_el_mandeb", "Babülmendep Boğazı"),
-        ("hormuz", "Hürmüz Boğazı"),
-        ("cape_of_good_hope", "Ümit Burnu"),
+        ("chokepoint1", "Süveyş Kanalı"),
+        ("chokepoint2", "Babülmendep Boğazı"),
+        ("chokepoint6", "Hürmüz Boğazı"),
+        ("chokepoint8", "Ümit Burnu"),
     ]
 
     mesajlar = ["🚢 <b>IMF PortWatch Deniz Trafiği Raporu</b>\n"]
     bulunan = 0
 
-    for ch_id, etiket in noktalar:
+    for pid, etiket in noktalar:
+        # Doğrudan ArcGIS'in tanıdığı portid alanı sorgulanır
         params = {
-            "where": f"chokepoint='{ch_id}' OR portid='{ch_id}'",
+            "where": f"portid='{pid}'",
             "outFields": "*",
             "orderByFields": "date desc",
             "resultRecordCount": 1,
@@ -56,6 +56,12 @@ def main():
             r = requests.get(endpoint, params=params, headers=headers, timeout=15)
             if r.status_code == 200:
                 data = r.json()
+                
+                # ArcGIS hata dönerse sebebini loga bas
+                if "error" in data:
+                    print(f"{etiket} API Hatası:", data["error"].get("message"))
+                    continue
+
                 features = data.get("features", [])
                 if features:
                     attr = features[0].get("attributes", {})
@@ -91,7 +97,7 @@ def main():
                     )
                     bulunan += 1
                 else:
-                    print(f"{etiket} için kayıt bulunamadı.")
+                    print(f"{etiket} için {pid} ile kayıt bulunamadı.")
             else:
                 print(f"{etiket} HTTP Hatası: {r.status_code}")
         except Exception as e:
