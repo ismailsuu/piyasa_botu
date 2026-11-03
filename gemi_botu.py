@@ -23,37 +23,46 @@ def send_telegram(mesaj):
 
 
 def main():
-    endpoint = "https://services9.arcgis.com/weJ1QsnbMYJlCHdG/arcgis/rest/services/Daily_Chokepoints_Data/FeatureServer/0/query"
+    # GÜNCEL IMF PORTWATCH ENDPOINT'İ (fqDgCAUbok0cvzq7)
+    endpoint = "https://services9.arcgis.com/fqDgCAUbok0cvzq7/arcgis/rest/services/Daily_Chokepoints_Data/FeatureServer/0/query"
 
     headers = {
         "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         ),
         "Accept": "application/json",
     }
 
+    # Güncel katmanda hem portid hem chokepoint adlandırması desteklenir
     noktalar = [
-        ("chokepoint1", "Süveyş Kanalı"),
-        ("chokepoint2", "Babülmendep Boğazı"),
-        ("chokepoint6", "Hürmüz Boğazı"),
-        ("chokepoint8", "Ümit Burnu"),
+        ("suez", "Süveyş Kanalı"),
+        ("bab_el_mandeb", "Babülmendep Boğazı"),
+        ("hormuz", "Hürmüz Boğazı"),
+        ("cape_of_good_hope", "Ümit Burnu"),
     ]
 
     mesajlar = ["🚢 <b>IMF PortWatch Deniz Trafiği Raporu</b>\n"]
     bulunan = 0
 
-    for pid, etiket in noktalar:
+    for ch_name, etiket in noktalar:
+        # Hem yeni 'chokepoint' alanını hem de eski 'portid' alanını kapsayacak where filtresi
         params = {
-            "where": f"portid='{pid}'",
+            "where": f"chokepoint='{ch_name}' OR portid='{ch_name}'",
             "outFields": "*",
             "orderByFields": "date desc",
             "resultRecordCount": 1,
             "f": "json",
         }
         try:
-            r = requests.get(endpoint, params=params, headers=headers, timeout=12)
+            r = requests.get(endpoint, params=params, headers=headers, timeout=15)
             if r.status_code == 200:
                 data = r.json()
+                
+                # API hata mesajı döndüyse yazdır
+                if "error" in data:
+                    print(f"{etiket} API Hatası:", data["error"].get("message"))
+                    continue
+
                 features = data.get("features", [])
                 if features:
                     attr = features[0].get("attributes", {})
@@ -85,19 +94,23 @@ def main():
 
                     mesajlar.append(f"⚓ <b>{etiket}</b> (Toplam: {int(toplam)})")
                     mesajlar.append(
-                        f"  ▫️ Tanker: {int(tanker)} | Konteyner: {int(konteyner)} | Kuru"
-                        f" Yük: {int(kuru)}\n"
+                        f"  ▫️ Tanker: {int(tanker)} | Konteyner: {int(konteyner)} | Kuru Yük: {int(kuru)}\n"
                     )
                     bulunan += 1
+                else:
+                    print(f"{etiket} için veri bulunamadı (boş döndü).")
+            else:
+                print(f"{etiket} HTTP Hatası: {r.status_code}")
         except Exception as e:
             print(f"{etiket} hatası: {e}")
 
     if bulunan > 0:
         mesajlar.append(
-            "📊 <b>Detaylı Grafikler ve Canlı Panel:</b>\n👉"
-            " https://ismail-piyasa.streamlit.app/"
+            "📊 <b>Detaylı Grafikler ve Canlı Panel:</b>\n👉 https://ismail-piyasa.streamlit.app/"
         )
         send_telegram("\n".join(mesajlar))
+    else:
+        print("Hiçbir noktadan veri çekilemedi.")
 
 
 if __name__ == "__main__":
