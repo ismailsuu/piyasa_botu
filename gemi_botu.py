@@ -4,7 +4,6 @@ import requests
 BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-
 def send_telegram(mesaj):
     if not BOT_TOKEN or not CHAT_ID:
         print("Hata: TELEGRAM_TOKEN veya TELEGRAM_CHAT_ID bulunamadı!")
@@ -23,71 +22,78 @@ def send_telegram(mesaj):
     except Exception as e:
         print("Telegram hatası:", e)
 
-
 def main():
-    # Güncel ve doğrulanmış IMF PortWatch API endpoint'i
-    endpoint = "https://services9.arcgis.com/fqDgCAUbok0cvzq7/arcgis/rest/services/PortWatch_Chokepoints_Daily_Transit_Data/FeatureServer/0/query"
+    # Token istemeyen, ArcGIS Hub üzerinden sağlanan resmi Chokepoints sorgu servisi
+    endpoint = "https://services9.arcgis.com/weJ1QsnbMYJlCHdG/arcgis/rest/services/Daily_Chokepoints_Data/FeatureServer/0/query"
 
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
         "Accept": "application/json",
     }
 
+    # Süveyş'i getiren kesin portid eşleşmeleri ve alternatifleri
     noktalar = [
-        ("Süveyş Kanalı", "suez"),
-        ("Babülmendep Boğazı", "bab_el_mandeb"),
-        ("Hürmüz Boğazı", "hormuz"),
-        ("Ümit Burnu", "cape_of_good_hope"),
+        ("Süveyş Kanalı", ["chokepoint1"]),
+        ("Babülmendep Boğazı", ["chokepoint2"]),
+        ("Hürmüz Boğazı", ["chokepoint3", "chokepoint6"]),
+        ("Ümit Burnu", ["chokepoint5", "chokepoint8"]),
     ]
 
     mesajlar = ["🚢 <b>IMF PortWatch Deniz Trafiği Raporu</b>\n"]
     bulunan = 0
 
-    for etiket, ch_name in noktalar:
-        # PortWatch açık katmanında doğrudan boğaz ismi (küçük harfle) sorgulanır
-        params = {
-            "where": f"chokepoint='{ch_name}' OR portid='{ch_name}'",
-            "outFields": "*",
-            "orderByFields": "date DESC",
-            "resultRecordCount": 1,
-            "f": "json",
-        }
+    for etiket, id_listesi in noktalar:
+        kayit = None
+        for pid in id_listesi:
+            params = {
+                "where": f"portid='{pid}'",
+                "outFields": "date,n_total,n_tanker,n_container,n_dry_bulk",
+                "orderByFields": "date DESC",
+                "resultRecordCount": 1,
+                "f": "json"
+            }
+            try:
+                r = requests.get(endpoint, params=params, headers=headers, timeout=15)
+                data = r.json()
+                if "features" in data and len(data["features"]) > 0:
+                    attr = data["features"][0].get("attributes", {})
+                    # Eğer son gün 0 ise, dolu olan son günü almak için n_total > 0 ile ara
+                    if (attr.get("n_total") or 0) == 0:
+                        params["where"] = f"portid='{pid}' AND n_total > 0"
+                        r_dolu = requests.get(endpoint, params=params, headers=headers, timeout=15)
+                        data_dolu = r_dolu.json()
+                        if "features" in data_dolu and len(data_dolu["features"]) > 0:
+                            kayit = data_dolu["features"][0].get("attributes", {})
+                            break
+                    else:
+                        kayit = attr
+                        break
+            except Exception as e:
+                print(f"{etiket} ({pid}) hatası:", e)
 
-        try:
-            r = requests.get(endpoint, params=params, headers=headers, timeout=15)
-            data = r.json()
+        if kayit:
+            toplam = kayit.get("n_total") or 0
+            tanker = kayit.get("n_tanker") or 0
+            konteyner = kayit.get("n_container") or 0
+            kuru = kayit.get("n_dry_bulk") or 0
 
-            if "error" in data:
-                print(f"{etiket} Sunucu Hatası:", data["error"].get("message"))
-                continue
+            mesajlar.append(f"⚓ <b>{etiket}</b> (Toplam: {int(toplam)})")
+            mesajlar.append(
+                f"  ▫️ Tanker: {int(tanker)} | Konteyner: {int(konteyner)} | Kuru Yük: {int(kuru)}\n"
+            )
+            bulunan += 1
+        else:
+            print(f"{etiket} için kayıt bulunamadı.")
 
-            fts = data.get("features", [])
-            if fts:
-                attr = fts[0].get("attributes", {})
-                toplam = attr.get("n_total") or attr.get("transit_calls") or 0
-                tanker = attr.get("n_tanker") or attr.get("tanker_calls") or 0
-                konteyner = attr.get("n_container") or attr.get("container_calls") or 0
-                kuru = attr.get("n_dry_bulk") or attr.get("dry_bulk_calls") or 0
-
-                mesajlar.append(f"⚓ <b>{etiket}</b> (Toplam: {int(toplam)})")
-                mesajlar.append(
-                    f"  ▫️ Tanker: {int(tanker)} | Konteyner: {int(konteyner)} | Kuru Yük: {int(kuru)}\n"
-                )
-                bulunan += 1
-            else:
-                print(f"{etiket} için {ch_name} ile kayıt bulunamadı.")
-        except Exception as e:
-            print(f"{etiket} istek hatası:", e)
-
+    # En az 1 boğaz bile çekilse mesajı Telegram'a gönder
     if bulunan > 0:
         mesajlar.append(
             "📊 <b>Detaylı Grafikler ve Canlı Panel:</b>\n👉 https://ismail-piyasa.streamlit.app/"
         )
         send_telegram("\n".join(mesajlar))
-        print(f"{bulunan} boğaz bilgisi başarıyla Telegram'a iletildi.")
+        print(f"Başarılı: {bulunan} boğaz Telegram'a iletildi.")
     else:
-        print("Hiçbir boğazdan geçerli kayıt alınamadı.")
-
+        print("Boğaz verisi alınamadı.")
 
 if __name__ == "__main__":
     main()
