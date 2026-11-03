@@ -3,85 +3,42 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Gemi Trafiği</title>
+    <title>Gemi Trafiği PWA</title>
     
-    <!-- PWA Kurulum ve Mobil Uyum Etiketleri -->
+    <!-- PWA Etiketleri -->
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#0f172a">
     <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/870/870143.png">
     
-    <!-- Veri Okuma ve Grafik Kütüphaneleri -->
+    <!-- Kütüphaneler -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
     <style>
-        :root {
-            --bg: #0f172a;
-            --card: #1e293b;
-            --text: #f8fafc;
-            --accent: #3b82f6;
-            --border: #334155;
-        }
-        * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+        :root { --bg: #0f172a; --card: #1e293b; --text: #f8fafc; --accent: #3b82f6; --border: #334155; }
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
         body { background-color: var(--bg); color: var(--text); padding: 20px; }
         
         .header { margin-bottom: 20px; text-align: center; }
         
-        /* Pill Menu (Mobilde Yatay Kaydırılabilir) */
-        .nav-pills {
-            display: flex;
-            gap: 10px;
-            overflow-x: auto;
-            white-space: nowrap;
-            padding-bottom: 10px;
-            margin-bottom: 20px;
-            scrollbar-width: none;
-        }
+        /* Pill Menu */
+        .nav-pills { display: flex; gap: 10px; overflow-x: auto; white-space: nowrap; padding-bottom: 10px; margin-bottom: 20px; scrollbar-width: none; }
         .nav-pills::-webkit-scrollbar { display: none; }
-        .pill {
-            background-color: var(--card);
-            border: 1px solid var(--border);
-            color: var(--text);
-            padding: 10px 20px;
-            border-radius: 50px;
-            cursor: pointer;
-            transition: all 0.2s;
-        }
+        .pill { background-color: var(--card); border: 1px solid var(--border); color: var(--text); padding: 10px 20px; border-radius: 50px; cursor: pointer; transition: all 0.2s; }
         .pill.active { background-color: var(--accent); border-color: var(--accent); }
         
-        /* Metrik Kartları */
-        .metrics {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-            gap: 15px;
-            margin-bottom: 20px;
-        }
-        .card {
-            background-color: var(--card);
-            padding: 15px;
-            border-radius: 12px;
-            border: 1px solid var(--border);
-            text-align: center;
-        }
+        /* Metrikler */
+        .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 15px; margin-bottom: 20px; }
+        .card { background-color: var(--card); padding: 15px; border-radius: 12px; border: 1px solid var(--border); text-align: center; }
         .card h4 { color: #94a3b8; font-size: 0.9rem; margin-bottom: 8px; font-weight: normal; }
         .card h2 { font-size: 1.8rem; margin: 0; }
         .date-info { color: #94a3b8; font-size: 0.8rem; text-align: center; margin-bottom: 20px; }
         
-        /* Grafik Kapsayıcı (Mobil Dinamik Yükseklik) */
-        .chart-container {
-            background-color: var(--card);
-            border: 1px solid var(--border);
-            border-radius: 12px;
-            padding: 15px;
-            height: 400px;
-            position: relative;
-            width: 100%;
-        }
-        @media (max-width: 768px) {
-            body { padding: 15px; }
-            .chart-container { height: 300px; }
-        }
-        #loader { text-align: center; color: var(--accent); margin: 20px 0; font-weight: bold; }
+        /* Grafik */
+        .chart-container { background-color: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 15px; height: 400px; position: relative; width: 100%; }
+        @media (max-width: 768px) { body { padding: 15px; } .chart-container { height: 300px; } }
+        
+        #loader { text-align: center; color: var(--accent); margin: 20px 0; font-weight: bold; padding: 10px; border-radius: 8px; background: rgba(59, 130, 246, 0.1); }
     </style>
 </head>
 <body>
@@ -98,10 +55,9 @@
         <div class="pill" onclick="changeStrait('Ümit Burnu')">Ümit Burnu</div>
     </div>
 
-    <div id="loader">Canlı Veriler Çekiliyor...</div>
+    <div id="loader">Canlı Veriler Aranıyor (1/2)...</div>
     <div class="date-info" id="m-date"></div>
 
-    <!-- Özet Kartları -->
     <div class="metrics">
         <div class="card"><h4>Toplam</h4><h2 id="m-total">-</h2></div>
         <div class="card"><h4>Tanker</h4><h2 id="m-tanker">-</h2></div>
@@ -109,64 +65,81 @@
         <div class="card"><h4>Kuru Yük</h4><h2 id="m-bulk">-</h2></div>
     </div>
 
-    <!-- Trend Grafiği -->
     <div class="chart-container">
         <canvas id="myChart"></canvas>
     </div>
 
     <script>
-        // PWA Servis Çalışanını Başlat
         if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('./sw.js').catch(err => console.log(err));
+            navigator.serviceWorker.register('./sw.js').catch(err => console.log("SW Kayıt Hatası:", err));
         }
 
         let globalData = [];
         let myChart = null;
 
+        // Daha geniş eşleştirme havuzu
         const chokepoints = {
-            'Süveyş Kanalı': 'chokepoint1',
-            'Babülmendep': 'chokepoint2',
-            'Hürmüz': 'chokepoint6',
-            'Ümit Burnu': 'chokepoint8'
+            'Süveyş Kanalı': ['chokepoint1', 'suez'],
+            'Babülmendep': ['chokepoint2', 'bab'],
+            'Hürmüz': ['chokepoint6', 'chokepoint3', 'hormuz'],
+            'Ümit Burnu': ['chokepoint8', 'chokepoint5', 'cape']
         };
 
-        // CORS güvenlik engellerini aşmak için proxy rotaları (Sırayla dener)
         async function loadData() {
-            const targetUrl = encodeURIComponent("https://hub.arcgis.com/api/v3/datasets/3da2b9ca97684916b75c4013f95d18ab_0/downloads/data?format=csv");
+            const loader = document.getElementById('loader');
+            const csvUrl = encodeURIComponent("https://hub.arcgis.com/api/v3/datasets/3da2b9ca97684916b75c4013f95d18ab_0/downloads/data?format=csv");
             
-            const proxies = [
-                `https://api.allorigins.win/raw?url=${targetUrl}`,
-                `https://corsproxy.io/?${targetUrl}`
-            ];
-
-            for (let url of proxies) {
-                try {
-                    let response = await fetch(url);
-                    if (response.ok) {
-                        let csvText = await response.text();
-                        
-                        // Hata sayfası döndüyse atla
-                        if (csvText.trim().startsWith("<") || !csvText.toLowerCase().includes("date")) {
-                            continue;
-                        }
-
-                        Papa.parse(csvText, {
-                            header: true,
-                            dynamicTyping: true,
-                            complete: function(results) {
-                                globalData = results.data;
-                                document.getElementById('loader').style.display = 'none';
-                                changeStrait('Süveyş Kanalı'); 
-                            }
-                        });
-                        return; // Başarılı olunca döngüden çık
+            // Yöntem 1: AllOrigins JSON Wrapper (Tarayıcı blokajlarını aşmak için en güvenlisi)
+            try {
+                loader.innerText = "Ana ağ geçidine bağlanılıyor...";
+                let res = await fetch(`https://api.allorigins.win/get?url=${csvUrl}`);
+                if (res.ok) {
+                    let data = await res.json();
+                    if (data.contents && data.contents.toLowerCase().includes("date")) {
+                        processCSV(data.contents);
+                        return;
                     }
-                } catch (err) {
-                    console.log("Proxy başarısız: " + url);
                 }
-            }
-            
-            document.getElementById('loader').innerText = "Veri çekilemedi. Tarayıcı veya internet güvenlik ayarlarınızı kontrol edin.";
+            } catch (e) { console.log("Yöntem 1 Başarısız:", e); }
+
+            // Yöntem 2: CodeTabs Proxy (Fallback - Yedek)
+            try {
+                loader.innerText = "Yedek sunucular deneniyor...";
+                let res = await fetch(`https://api.codetabs.com/v1/proxy?quest=${csvUrl}`);
+                if (res.ok) {
+                    let text = await res.text();
+                    if (text && text.toLowerCase().includes("date")) {
+                        processCSV(text);
+                        return;
+                    }
+                }
+            } catch (e) { console.log("Yöntem 2 Başarısız:", e); }
+
+            loader.style.color = "#e74c3c";
+            loader.style.background = "rgba(231, 76, 60, 0.1)";
+            loader.innerText = "Bağlantı Kurulamadı. Lütfen sayfayı yenileyin.";
+        }
+
+        function processCSV(csvText) {
+            Papa.parse(csvText, {
+                header: true,
+                dynamicTyping: true,
+                skipEmptyLines: true,
+                complete: function(results) {
+                    // Sütun isimlerini küçük harfe zorla (bazen değişebiliyor)
+                    let normalizedData = results.data.map(row => {
+                        let newRow = {};
+                        for (let key in row) {
+                            if(key) newRow[key.toString().toLowerCase().trim()] = row[key];
+                        }
+                        return newRow;
+                    });
+                    
+                    globalData = normalizedData;
+                    document.getElementById('loader').style.display = 'none';
+                    changeStrait('Süveyş Kanalı'); 
+                }
+            });
         }
 
         function changeStrait(straitName) {
@@ -175,15 +148,18 @@
                 if(el.innerText === straitName) el.classList.add('active');
             });
 
-            const pid = chokepoints[straitName];
+            const pids = chokepoints[straitName];
             
             let filtered = globalData.filter(r => {
                 let rId = (r.portid || r.chokepoint || r.name || "").toString().toLowerCase();
-                return rId.includes(pid);
+                return pids.some(pid => rId.includes(pid));
             });
 
             filtered = filtered.map(r => {
                 let d = new Date(r.date);
+                // Eğer Unix Timestamp ise (sayısal)
+                if(!isNaN(r.date) && r.date > 1000000000) { d = new Date(r.date); }
+                
                 return {
                     dateObj: d,
                     dateStr: d.toISOString().split('T')[0],
@@ -204,7 +180,6 @@
             document.getElementById('m-bulk').innerText = latest.bulk;
             document.getElementById('m-date').innerText = "Son Geçerli Veri: " + latest.dateStr;
 
-            // Son 6 ayı (yaklaşık 180 gün) grafiğe aktar
             let chartData = filtered.slice(0, 180).reverse();
             drawChart(chartData, straitName);
         }
@@ -218,7 +193,7 @@
                 data: {
                     labels: data.map(d => d.dateStr),
                     datasets: [{
-                        label: 'Toplam Gemi Geçişi',
+                        label: 'Toplam Geçiş',
                         data: data.map(d => d.total),
                         borderColor: '#3b82f6',
                         backgroundColor: 'rgba(59, 130, 246, 0.1)',
