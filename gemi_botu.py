@@ -1,5 +1,4 @@
 import os
-import io
 import requests
 import pandas as pd
 
@@ -25,33 +24,25 @@ def send_telegram(mesaj):
         print("Telegram hatası:", e)
 
 def main():
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    }
+    # GitHub Actions çalışırken dosyayı doğrudan yandaki lokal klasörden okur
+    dosya_yolu = "veri.csv"
+    
+    if not os.path.exists(dosya_yolu):
+        print("Kritik Hata: 'veri.csv' dosyası bulunamadı! Lütfen güncel CSV dosyasını GitHub'a yükleyin.")
+        return
 
-    # Doğrulanmış ArcGIS Hub CSV İndirme Bağlantıları (Dataset ID: 3da2b9ca97684916b75c4013f95d18ab)
-    csv_urls = [
-        "https://hub.arcgis.com/api/v3/datasets/3da2b9ca97684916b75c4013f95d18ab_0/downloads/data?format=csv&spatialRefId=4326&where=1%3D1",
-        "https://portwatch.imf.org/api/v3/datasets/3da2b9ca97684916b75c4013f95d18ab_0/downloads/data?format=csv"
-    ]
-
-    df = pd.DataFrame()
-    for url in csv_urls:
-        try:
-            r = requests.get(url, headers=headers, timeout=30)
-            if r.status_code == 200:
-                df = pd.read_csv(io.StringIO(r.text))
-                if not df.empty:
-                    break
-        except Exception:
-            continue
+    try:
+        df = pd.read_csv(dosya_yolu)
+    except Exception as e:
+        print(f"CSV okuma hatası: {e}")
+        return
 
     if df.empty:
-        print("Kritik Hata: Veri kaynaklarından geçerli CSV dosyası alınamadı (404/Bağlantı Hatası).")
+        print("Kritik Hata: 'veri.csv' dosyası boş.")
         return
 
     # Sütun isimlerini güvenli okuma için küçük harfe çevir
-    df.columns = [str(col).lower() for col in df.columns]
+    df.columns = [str(col).lower().strip() for col in df.columns]
 
     # Tarihe göre en sondan (en güncelden) geriye sırala
     if "date" in df.columns:
@@ -107,9 +98,8 @@ def main():
             print(f"{etiket} için geçerli kayıt bulunamadı.")
 
     if bulunan > 0:
-        mesajlar.append(
-            "📊 <b>Detaylı Grafikler ve Canlı Panel:</b>\n👉 https://ismail-piyasa.streamlit.app/"
-        )
+        # Linki kendi GitHub Pages PWA adresinizle değiştirebilirsiniz
+        mesajlar.append("📊 <b>Detaylı Grafikler ve Canlı Panel PWA'da!</b>")
         send_telegram("\n".join(mesajlar))
         print(f"Başarılı: {bulunan} boğaz Telegram'a iletildi.")
     else:
