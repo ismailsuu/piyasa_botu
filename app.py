@@ -1,3 +1,4 @@
+import io
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
@@ -44,10 +45,10 @@ LANG = {
         "marine_settings": "⚓ Deniz Trafiği Ayarları",
         "strait": "Boğaz / Geçit",
         "chokepoints": {
-            "Süveyş Kanalı": "chokepoint1",
-            "Babülmendep Boğazı": "chokepoint2",
-            "Hürmüz Boğazı": "chokepoint6",
-            "Ümit Burnu": "chokepoint8",
+            "Süveyş Kanalı": ["chokepoint1", "suez"],
+            "Babülmendep Boğazı": ["chokepoint2", "bab el-mandeb", "bab_el_mandeb"],
+            "Hürmüz Boğazı": ["chokepoint6", "chokepoint3", "hormuz"],
+            "Ümit Burnu": ["chokepoint8", "chokepoint5", "cape_of_good_hope", "cape of good hope"],
         },
         "time_ranges": ["Son 1 Yıl", "Son 3 Yıl", "Son 5 Yıl", "Tüm Geçmiş (2019 - Günümüz)"],
         "spinner_text": "Veriler yükleniyor...",
@@ -91,10 +92,10 @@ LANG = {
         "marine_settings": "⚓ Maritime Settings",
         "strait": "Chokepoint / Strait",
         "chokepoints": {
-            "Suez Canal": "chokepoint1",
-            "Bab el-Mandeb Strait": "chokepoint2",
-            "Strait of Hormuz": "chokepoint6",
-            "Cape of Good Hope": "chokepoint8",
+            "Suez Canal": ["chokepoint1", "suez"],
+            "Bab el-Mandeb Strait": ["chokepoint2", "bab el-mandeb", "bab_el_mandeb"],
+            "Strait of Hormuz": ["chokepoint6", "chokepoint3", "hormuz"],
+            "Cape of Good Hope": ["chokepoint8", "chokepoint5", "cape_of_good_hope", "cape of good hope"],
         },
         "time_ranges": ["Last 1 Year", "Last 3 Years", "Last 5 Years", "All History (2019 - Present)"],
         "spinner_text": "Loading data...",
@@ -261,7 +262,7 @@ else:
     st.sidebar.markdown("---")
     st.sidebar.header(t["marine_settings"])
     secilen_bogaz = st.sidebar.selectbox(t["strait"], list(chokepoints_dict.keys()))
-    selected_pid = chokepoints_dict[secilen_bogaz]
+    selected_pid_list = chokepoints_dict[secilen_bogaz]
 
     secilen_aralik = st.sidebar.radio(
         t["timeframe"],
@@ -270,58 +271,67 @@ else:
     )
 
     @st.cache_data(ttl=3600)
-    def load_portwatch_history(pid):
-        # IMF PortWatch halka açık, token istemeyen güncel katman
-        endpoint = "https://services9.arcgis.com/fqDgCAUbok0cvzq7/arcgis/rest/services/PortWatch_Chokepoints_Daily_Transit_Data/FeatureServer/0/query"
+    def load_portwatch_history(pid_list):
+        # API engellerini (403, 404, 499) aşmak için doğrudan açık CSV
+        csv_url = "https://portwatch.imf.org/api/v1/downloads/chokepoints/daily"
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Accept": "application/json",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         }
-
-        # Token gerektirmeyen tekil sorgu
-        params = {
-            "where": f"portid='{pid}'",
-            "outFields": "*",
-            "orderByFields": "date desc",
-            "resultRecordCount": 1000,
-            "f": "json",
-        }
-
+        
         try:
-            r = requests.get(endpoint, params=params, headers=headers, timeout=25)
+            r = requests.get(csv_url, headers=headers, timeout=30)
             if r.status_code == 200:
-                data = r.json()
-                features = data.get("features", [])
-                if features:
-                    records = [f["attributes"] for f in features]
-                    df = pd.DataFrame(records)
-
-                    # Sütun adı uyumlulukları
-                    if "n_total" not in df.columns:
-                        df["n_total"] = df.get("transit_calls", df.get("total_calls", 0))
-                    if "n_tanker" not in df.columns:
-                        df["n_tanker"] = df.get("tanker_calls", df.get("tankers", 0))
-                    if "n_container" not in df.columns:
-                        df["n_container"] = df.get("container_calls", df.get("containers", 0))
-                    if "n_dry_bulk" not in df.columns:
-                        df["n_dry_bulk"] = df.get("dry_bulk_calls", df.get("cargo_calls", 0))
-
-                    if "date" in df.columns:
-                        try:
-                            df["date"] = pd.to_datetime(df["date"], unit="ms")
-                        except Exception:
-                            df["date"] = pd.to_datetime(df["date"])
-
-                        # Sadece geçerli veri olan günleri al
-                        df = df[df["n_total"] > 0].sort_values("date").reset_index(drop=True)
-                        return df
+                df = pd.read_csv(io.StringIO(r.text))
+            else:
+                st.error(f"Veri indirilemedi. HTTP Status: {r.status_code}")
+                return pd.DataFrame()
         except Exception as e:
             st.error(f"Bağlantı hatası: {e}")
+            return pd.DataFrame()
 
+        if df.empty:
+            return pd.DataFrame()
+
+        # Sütun isimlerini normalize et
+        df.columns = [str(col).lower() for col in df.columns]
+
+        id_col = next((col for col in ["portid", "chokepoint", "chokepoint_name", "name"] if col in df.columns), None)
+        if not id_col:
+            return pd.DataFrame()
+
+        # Boğaz ID'si veya İsmine göre filtrele
+        mask = df[id_col].astype(str).str.lower().apply(lambda x: any(pid in x for pid in pid_list))
+        df_filtered = df[mask].copy()
+
+        if df_filtered.empty:
+            return pd.DataFrame()
+
+        # Sütun uyumlulukları (Eski API isimleri vs Yeni CSV isimleri)
+        if "n_total" not in df_filtered.columns:
+            df_filtered["n_total"] = df_filtered.get("transit_calls", df_filtered.get("total_calls", 0))
+        if "n_tanker" not in df_filtered.columns:
+            df_filtered["n_tanker"] = df_filtered.get("tanker_calls", df_filtered.get("tankers", 0))
+        if "n_container" not in df_filtered.columns:
+            df_filtered["n_container"] = df_filtered.get("container_calls", df_filtered.get("containers", 0))
+        if "n_dry_bulk" not in df_filtered.columns:
+            df_filtered["n_dry_bulk"] = df_filtered.get("dry_bulk_calls", df_filtered.get("cargo_calls", 0))
+
+        if "date" in df_filtered.columns:
+            df_filtered["date"] = pd.to_datetime(df_filtered["date"], errors="coerce")
+            df_filtered = df_filtered.dropna(subset=["date"])
+            
+            # Değerleri sayıya çevir
+            cols_to_numeric = ["n_total", "n_tanker", "n_container", "n_dry_bulk"]
+            for col in cols_to_numeric:
+                df_filtered[col] = pd.to_numeric(df_filtered[col], errors="coerce").fillna(0)
+
+            df_filtered = df_filtered[df_filtered["n_total"] > 0].sort_values("date").reset_index(drop=True)
+            return df_filtered
+            
         return pd.DataFrame()
 
     with st.spinner(t["spinner_text"]):
-        df_pw = load_portwatch_history(selected_pid)
+        df_pw = load_portwatch_history(selected_pid_list)
 
     if not df_pw.empty:
         bugun = df_pw["date"].max()
@@ -334,61 +344,64 @@ else:
         else:
             df_filtre = df_pw
 
-        son_gun = df_filtre.iloc[-1]
-        g1, g2, g3, g4 = st.columns(4)
-        g1.metric(t["daily_total"], f"{int(son_gun.get('n_total', 0))}")
-        g2.metric(t["tanker"], f"{int(son_gun.get('n_tanker', 0))}")
-        g3.metric(t["container"], f"{int(son_gun.get('n_container', 0))}")
-        g4.metric(t["dry_bulk"], f"{int(son_gun.get('n_dry_bulk', 0))}")
+        if df_filtre.empty:
+            st.warning(f"{secilen_bogaz} {t['no_data']}")
+        else:
+            son_gun = df_filtre.iloc[-1]
+            g1, g2, g3, g4 = st.columns(4)
+            g1.metric(t["daily_total"], f"{int(son_gun.get('n_total', 0))}")
+            g2.metric(t["tanker"], f"{int(son_gun.get('n_tanker', 0))}")
+            g3.metric(t["container"], f"{int(son_gun.get('n_container', 0))}")
+            g4.metric(t["dry_bulk"], f"{int(son_gun.get('n_dry_bulk', 0))}")
 
-        t1, t2, t3 = st.tabs([t["tab_total"], t["tab_types"], t["tab_raw"]])
+            t1, t2, t3 = st.tabs([t["tab_total"], t["tab_types"], t["tab_raw"]])
 
-        with t1:
-            fig_trend = px.line(
-                df_filtre,
-                x="date",
-                y="n_total",
-                title=f"{secilen_bogaz} - {t['chart_total_title']} ({secilen_aralik})",
-                labels={"date": t["date"], "n_total": t["daily_calls"]},
-            )
-            fig_trend.update_layout(hovermode="x unified")
-            st.plotly_chart(fig_trend, use_container_width=True)
+            with t1:
+                fig_trend = px.line(
+                    df_filtre,
+                    x="date",
+                    y="n_total",
+                    title=f"{secilen_bogaz} - {t['chart_total_title']} ({secilen_aralik})",
+                    labels={"date": t["date"], "n_total": t["daily_calls"]},
+                )
+                fig_trend.update_layout(hovermode="x unified")
+                st.plotly_chart(fig_trend, use_container_width=True)
 
-        with t2:
-            df_filtre_renamed = df_filtre.rename(
-                columns={
-                    "n_tanker": t["tanker"],
-                    "n_container": t["container"],
-                    "n_dry_bulk": t["dry_bulk"],
+            with t2:
+                df_filtre_renamed = df_filtre.rename(
+                    columns={
+                        "n_tanker": t["tanker"],
+                        "n_container": t["container"],
+                        "n_dry_bulk": t["dry_bulk"],
+                    }
+                )
+                color_map = {
+                    t["tanker"]: "#e74c3c",
+                    t["container"]: "#3498db",
+                    t["dry_bulk"]: "#f1c40f",
                 }
-            )
-            color_map = {
-                t["tanker"]: "#e74c3c",
-                t["container"]: "#3498db",
-                t["dry_bulk"]: "#f1c40f",
-            }
 
-            fig_types = px.line(
-                df_filtre_renamed,
-                x="date",
-                y=[t["tanker"], t["container"], t["dry_bulk"]],
-                title=f"{secilen_bogaz} - {t['chart_types_title']} ({secilen_aralik})",
-                labels={"date": t["date"], "value": t["daily_calls"], "variable": t["type"]},
-                color_discrete_map=color_map,
-            )
-            fig_types.update_layout(hovermode="x unified")
-            st.plotly_chart(fig_types, use_container_width=True)
+                fig_types = px.line(
+                    df_filtre_renamed,
+                    x="date",
+                    y=[t["tanker"], t["container"], t["dry_bulk"]],
+                    title=f"{secilen_bogaz} - {t['chart_types_title']} ({secilen_aralik})",
+                    labels={"date": t["date"], "value": t["daily_calls"], "variable": t["type"]},
+                    color_discrete_map=color_map,
+                )
+                fig_types.update_layout(hovermode="x unified")
+                st.plotly_chart(fig_types, use_container_width=True)
 
-        with t3:
-            st.dataframe(
-                df_filtre[[
-                    "date",
-                    "n_total",
-                    "n_tanker",
-                    "n_container",
-                    "n_dry_bulk",
-                ]].sort_values("date", ascending=False),
-                use_container_width=True,
-            )
+            with t3:
+                st.dataframe(
+                    df_filtre[[
+                        "date",
+                        "n_total",
+                        "n_tanker",
+                        "n_container",
+                        "n_dry_bulk",
+                    ]].sort_values("date", ascending=False),
+                    use_container_width=True,
+                )
     else:
         st.warning(f"{secilen_bogaz} {t['no_data']}")
