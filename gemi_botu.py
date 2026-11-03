@@ -24,91 +24,60 @@ def send_telegram(mesaj):
         print("Telegram hatası:", e)
 
 
-def get_arcgis_anonymous_token():
-    """ArcGIS Hub'ın halka açık anonim token servisini kullanarak geçici token alır."""
-    token_url = "https://www.arcgis.com/sharing/rest/generateToken"
-    data = {
-        "f": "json",
-        "client": "requestip",
-        "expiration": "60",
-    }
-    try:
-        r = requests.post(token_url, data=data, timeout=10)
-        if r.status_code == 200:
-            res = r.json()
-            return res.get("token")
-    except Exception as e:
-        print("Anonim token alınamadı:", e)
-    return None
-
-
 def main():
-    endpoint = "https://services9.arcgis.com/weJ1QsnbMYJlCHdG/arcgis/rest/services/Daily_Chokepoints_Data/FeatureServer/0/query"
+    # Token istemeyen, doğrudan IMF PortWatch açık API servisi
+    endpoint = "https://portwatch.imf.org/api/v1/chokepoints/daily"
 
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Accept": "application/json",
-        "Referer": "https://portwatch.imf.org/",
     }
 
-    # Anonim oturum anahtarı alıyoruz
-    anon_token = get_arcgis_anonymous_token()
-    if anon_token:
-        print("ArcGIS Anonim Token başarıyla üretildi.")
-    else:
-        print("Token üretilemedi, doğrudan istek denenecek.")
-
     noktalar = [
-        ("Süveyş Kanalı", ["chokepoint1"]),
-        ("Babülmendep Boğazı", ["chokepoint2"]),
-        ("Hürmüz Boğazı", ["chokepoint6", "chokepoint3"]),
-        ("Ümit Burnu", ["chokepoint8", "chokepoint5"]),
+        ("Süveyş Kanalı", ["suez", "chokepoint1"]),
+        ("Babülmendep Boğazı", ["bab_el_mandeb", "chokepoint2"]),
+        ("Hürmüz Boğazı", ["hormuz", "chokepoint6", "chokepoint3"]),
+        ("Ümit Burnu", ["cape_of_good_hope", "chokepoint8", "chokepoint5"]),
     ]
 
     mesajlar = ["🚢 <b>IMF PortWatch Deniz Trafiği Raporu</b>\n"]
     bulunan = 0
 
-    for etiket, id_listesi in noktalar:
-        kayit = None
-        for pid in id_listesi:
-            params = {
-                "where": f"portid='{pid}' AND n_total > 0",
-                "outFields": "date,n_total,n_tanker,n_container,n_dry_bulk",
-                "orderByFields": "date DESC",
-                "resultRecordCount": 1,
-                "f": "json",
-            }
-            if anon_token:
-                params["token"] = anon_token
+    try:
+        r = requests.get(endpoint, headers=headers, timeout=20)
+        if r.status_code == 200:
+            data = r.json()
+            # Liste formatında veya dict formatında gelebilir
+            records = data if isinstance(data, list) else data.get("data", data.get("features", []))
 
-            try:
-                r = requests.get(endpoint, params=params, headers=headers, timeout=15)
-                data = r.json()
+            for etiket, anahtarlar in noktalar:
+                satir = None
+                for rec in records:
+                    item = rec.get("attributes", rec)
+                    # ID veya isim eşleşmesi kontrolü
+                    item_id = str(item.get("chokepoint") or item.get("portid") or item.get("name") or "").lower()
+                    if any(k.lower() in item_id for k in anahtarlar):
+                        if (item.get("n_total") or item.get("total") or item.get("transit_calls") or 0) > 0:
+                            satir = item
+                            break
 
-                if "error" in data:
-                    print(f"{etiket} ({pid}) API Hatası:", data["error"].get("message"))
-                    continue
+                if satir:
+                    toplam = satir.get("n_total") or satir.get("total") or satir.get("transit_calls") or 0
+                    tanker = satir.get("n_tanker") or satir.get("tanker") or satir.get("tanker_calls") or 0
+                    konteyner = satir.get("n_container") or satir.get("container") or satir.get("container_calls") or 0
+                    kuru = satir.get("n_dry_bulk") or satir.get("dry_bulk") or satir.get("dry_bulk_calls") or 0
 
-                fts = data.get("features", [])
-                if fts:
-                    kayit = fts[0].get("attributes", {})
-                    break
-            except Exception as e:
-                print(f"{etiket} ({pid}) hatası:", e)
-
-        if kayit:
-            toplam = kayit.get("n_total") or 0
-            tanker = kayit.get("n_tanker") or 0
-            konteyner = kayit.get("n_container") or 0
-            kuru = kayit.get("n_dry_bulk") or 0
-
-            mesajlar.append(f"⚓ <b>{etiket}</b> (Toplam: {int(toplam)})")
-            mesajlar.append(
-                f"  ▫️ Tanker: {int(tanker)} | Konteyner: {int(konteyner)} | Kuru Yük: {int(kuru)}\n"
-            )
-            bulunan += 1
+                    mesajlar.append(f"⚓ <b>{etiket}</b> (Toplam: {int(toplam)})")
+                    mesajlar.append(
+                        f"  ▫️ Tanker: {int(tanker)} | Konteyner: {int(konteyner)} | Kuru Yük: {int(kuru)}\n"
+                    )
+                    bulunan += 1
+                else:
+                    print(f"{etiket} için eşleşen kayıt bulunamadı.")
         else:
-            print(f"{etiket} için kayıt bulunamadı.")
+            print("HTTP İstek Hatası:", r.status_code)
+    except Exception as e:
+        print("Bağlantı hatası:", e)
 
     if bulunan > 0:
         mesajlar.append(
@@ -117,7 +86,7 @@ def main():
         send_telegram("\n".join(mesajlar))
         print(f"Başarılı: {bulunan} boğaz Telegram'a iletildi.")
     else:
-        print("Kritik: Hiçbir boğazdan kayıt alınamadı.")
+        print("Kritik: Boğaz verisi alınamadı.")
 
 
 if __name__ == "__main__":
