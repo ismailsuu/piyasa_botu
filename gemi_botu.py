@@ -1,4 +1,5 @@
 import os
+import pandas as pd
 import requests
 
 BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
@@ -25,87 +26,87 @@ def send_telegram(mesaj):
 
 
 def main():
-    endpoint = "https://services9.arcgis.com/weJ1QsnbMYJlCHdG/arcgis/rest/services/Daily_Chokepoints_Data/FeatureServer/0/query"
+    # Token istemeyen doğrudan açık veri CSV kaynağı
+    csv_url = "https://raw.githubusercontent.com/datasets/portwatch-chokepoints/main/daily_chokepoints.csv"
+    fallback_url = "https://services9.arcgis.com/weJ1QsnbMYJlCHdG/arcgis/rest/services/Daily_Chokepoints_Data/FeatureServer/0/query?where=1%3D1&outFields=*&f=json&resultRecordCount=1000"
 
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept": "application/json",
-    }
+    print("--- Veri Çekiliyor ---")
+    df = None
 
-    # Son işlenmiş 100 kaydı çekip içindeki tüm farklı boğazları tespit ediyoruz
-    params = {
-        "where": "n_total > 0",
-        "outFields": "date,portid,port_name,n_total,n_tanker,n_container,n_dry_bulk",
-        "orderByFields": "date DESC",
-        "resultRecordCount": 100,
-        "f": "json",
-    }
-
-    print("--- IMF PortWatch Sorgulanıyor ---")
+    # 1. Öncelik: Hızlı ve engelsiz açık CSV
     try:
-        r = requests.get(endpoint, params=params, headers=headers, timeout=20)
-        print("HTTP Kodu:", r.status_code)
-        if r.status_code != 200:
-            print("Sunucu Hatası:", r.text)
-            return
+        df = pd.read_csv(csv_url)
+        print("CSV kaynağından veri başarıyla alındı.")
+    except Exception as e:
+        print("CSV alınamadı, alternatif deneniyor:", e)
 
-        data = r.json()
-        if "error" in data:
-            print("ArcGIS Hatası:", data["error"])
-            return
+    # 2. Alternatif: IMF PortWatch açık API aynası
+    if df is None or df.empty:
+        try:
+            headers = {"User-Agent": "Mozilla/5.0"}
+            r = requests.get(fallback_url, headers=headers, timeout=20)
+            data = r.json()
+            features = data.get("features", [])
+            if features:
+                records = [f["attributes"] for f in features]
+                df = pd.DataFrame(records)
+                print("Alternatif API kaynağından veri alındı.")
+        except Exception as e:
+            print("Alternatif kaynak hatası:", e)
 
-        features = data.get("features", [])
-        print(f"Gelen toplam kayıt sayısı: {len(features)}")
+    if df is None or df.empty:
+        print("Veri kaynağına ulaşılamadı.")
+        return
 
-        # Boğazları ID'lerine göre en güncel tekil kayıt olarak gruplayalım
-        gorulen_noktalar = {}
-        for f in features:
-            attr = f.get("attributes", {})
-            pid = attr.get("portid")
-            if pid and pid not in gorulen_noktalar:
-                gorulen_noktalar[pid] = attr
+    # Sütun isimlerini küçük harfe çekerek standartlaştır
+    df.columns = [c.lower() for c in df.columns]
 
-        print("\n--- SUNUCUDA BULUNAN BOĞAZLAR VE ID'LERİ ---")
-        for pid, attr in gorulen_noktalar.items():
-            print(f"ID: {pid} | İsim: {attr.get('port_name')} | Toplam: {attr.get('n_total')}")
+    # Tarihe göre en güncelden eskiye sırala
+    if "date" in df.columns:
+        df["date"] = pd.to_datetime(df["date"])
+        df = df.sort_values("date", ascending=False)
 
-        # Telegram için mesaj oluştur
-        tr_adlar = {
-            "chokepoint1": "Süveyş Kanalı",
-            "chokepoint2": "Babülmendep Boğazı",
-            "chokepoint3": "Hürmüz Boğazı",
-            "chokepoint6": "Hürmüz Boğazı",
-            "chokepoint5": "Ümit Burnu",
-            "chokepoint8": "Ümit Burnu",
-        }
+    noktalar = [
+        ("Süveyş Kanalı", ["chokepoint1", "suez"]),
+        ("Babülmendep Boğazı", ["chokepoint2", "bab_el_mandeb", "mandeb"]),
+        ("Hürmüz Boğazı", ["chokepoint6", "chokepoint3", "hormuz"]),
+        ("Ümit Burnu", ["chokepoint8", "chokepoint5", "cape_of_good_hope"]),
+    ]
 
-        mesajlar = ["🚢 <b>IMF PortWatch Deniz Trafiği Raporu</b>\n"]
-        eklenen = 0
+    mesajlar = ["🚢 <b>IMF PortWatch Deniz Trafiği Raporu</b>\n"]
+    bulunan = 0
 
-        for pid, attr in gorulen_noktalar.items():
-            etiket = tr_adlar.get(pid, attr.get("port_name", pid))
-            toplam = attr.get("n_total") or 0
-            tanker = attr.get("n_tanker") or 0
-            konteyner = attr.get("n_container") or 0
-            kuru = attr.get("n_dry_bulk") or 0
+    id_col = "portid" if "portid" in df.columns else ("chokepoint" if "chokepoint" in df.columns else None)
+
+    for etiket, anahtarlar in noktalar:
+        satir = None
+        if id_col:
+            for k in anahtarlar:
+                alt_df = df[df[id_col].astype(str).str.lower() == k.lower()]
+                if not alt_df.empty:
+                    satir = alt_df.iloc[0]
+                    break
+
+        if satir is not None:
+            toplam = satir.get("n_total") or satir.get("transit_calls") or 0
+            tanker = satir.get("n_tanker") or satir.get("tanker_calls") or 0
+            konteyner = satir.get("n_container") or satir.get("container_calls") or 0
+            kuru = satir.get("n_dry_bulk") or satir.get("dry_bulk_calls") or 0
 
             mesajlar.append(f"⚓ <b>{etiket}</b> (Toplam: {int(toplam)})")
             mesajlar.append(
                 f"  ▫️ Tanker: {int(tanker)} | Konteyner: {int(konteyner)} | Kuru Yük: {int(kuru)}\n"
             )
-            eklenen += 1
+            bulunan += 1
 
-        if eklenen > 0:
-            mesajlar.append(
-                "📊 <b>Detaylı Grafikler ve Canlı Panel:</b>\n👉 https://ismail-piyasa.streamlit.app/"
-            )
-            send_telegram("\n".join(mesajlar))
-            print(f"{eklenen} adet nokta başarıyla Telegram'a gönderildi.")
-        else:
-            print("Hiçbir boğaz kaydı ayrıştırılamadı.")
-
-    except Exception as e:
-        print("Bağlantı/Çalışma Hatası:", e)
+    if bulunan > 0:
+        mesajlar.append(
+            "📊 <b>Detaylı Grafikler ve Canlı Panel:</b>\n👉 https://ismail-piyasa.streamlit.app/"
+        )
+        send_telegram("\n".join(mesajlar))
+        print(f"Başarılı: {bulunan} boğaz Telegram'a gönderildi.")
+    else:
+        print("Boğazlar filtrelenemedi.")
 
 
 if __name__ == "__main__":
