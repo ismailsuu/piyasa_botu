@@ -271,13 +271,13 @@ else:
 
     @st.cache_data(ttl=1800)
     def load_portwatch_history(pid):
-        # GÜNCEL IMF PORTWATCH ENDPOINT'İ
-        endpoint = "https://services9.arcgis.com/fqDgCAUbok0cvzq7/arcgis/rest/services/Daily_Chokepoints_Data/FeatureServer/0/query"
+        # DOĞRULANMIŞ GÜNCEL IMF PORTWATCH ENDPOINT'İ
+        endpoint = "https://services9.arcgis.com/fqDgCAUbok0cvzq7/arcgis/rest/services/PortWatch_Chokepoints_Daily_Transit_Data/FeatureServer/0/query"
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         }
 
-        # Eski ID'ler ile yeni isimler arasında köprü eşleştirmesi
+        # Eski ID kodlarıyla yeni isimler arasında tam eşleme
         legacy_map = {
             "suez": "chokepoint1",
             "bab_el_mandeb": "chokepoint2",
@@ -317,7 +317,7 @@ else:
         if tum_kayitlar:
             df = pd.DataFrame(tum_kayitlar)
             
-            # Sütun adı uyumluluk kontrolü
+            # Kolon ismi eşitlemeleri
             if "n_total" not in df.columns:
                 df["n_total"] = df.get("transit_calls", df.get("total_calls", 0))
             if "n_tanker" not in df.columns:
