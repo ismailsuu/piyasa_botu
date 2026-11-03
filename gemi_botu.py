@@ -32,20 +32,21 @@ def main():
         "Accept": "application/json",
     }
 
-    # Boğazların olası portid varyasyonları
+    # IMF PortWatch tablosundaki kesin ID varyasyonları
     noktalar = [
-        ("Süveyş Kanalı", ["chokepoint1", "suez"]),
+        ("Süveyş Kanalı", ["chokepoint1"]),
         ("Babülmendep Boğazı", ["chokepoint2", "bab_el_mandeb"]),
-        ("Hürmüz Boğazı", ["chokepoint6", "chokepoint3", "hormuz"]),
-        ("Ümit Burnu", ["chokepoint8", "chokepoint5", "cape_of_good_hope"]),
+        ("Hürmüz Boğazı", ["chokepoint3", "chokepoint6", "hormuz"]),
+        ("Ümit Burnu", ["chokepoint5", "chokepoint8", "cape_of_good_hope"]),
     ]
 
     mesajlar = ["🚢 <b>IMF PortWatch Deniz Trafiği Raporu</b>\n"]
     bulunan = 0
 
     for etiket, id_listesi in noktalar:
-        kayit = None
+        veri_bulundu = False
         for pid in id_listesi:
+            # Hem n_total > 0 olan en son günü hem de basit sorguyu dener
             params = {
                 "where": f"portid='{pid}' AND n_total > 0",
                 "outFields": "date,n_total,n_tanker,n_container,n_dry_bulk",
@@ -54,36 +55,39 @@ def main():
                 "f": "json",
             }
             try:
-                r = requests.get(endpoint, params=params, headers=headers, timeout=12)
+                r = requests.get(endpoint, params=params, headers=headers, timeout=10)
                 if r.status_code == 200:
                     data = r.json()
                     features = data.get("features", [])
                     if features:
-                        kayit = features[0].get("attributes", {})
+                        attr = features[0].get("attributes", {})
+                        toplam = attr.get("n_total") or 0
+                        tanker = attr.get("n_tanker") or 0
+                        konteyner = attr.get("n_container") or 0
+                        kuru = attr.get("n_dry_bulk") or 0
+
+                        mesajlar.append(f"⚓ <b>{etiket}</b> (Toplam: {int(toplam)})")
+                        mesajlar.append(
+                            f"  ▫️ Tanker: {int(tanker)} | Konteyner: {int(konteyner)} | Kuru Yük: {int(kuru)}\n"
+                        )
+                        bulunan += 1
+                        veri_bulundu = True
                         break
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"{etiket} ({pid}) hatası: {e}")
 
-        if kayit:
-            toplam = kayit.get("n_total") or 0
-            tanker = kayit.get("n_tanker") or 0
-            konteyner = kayit.get("n_container") or 0
-            kuru = kayit.get("n_dry_bulk") or 0
+        if not veri_bulundu:
+            print(f"Uyarı: {etiket} için hiçbir ID eşleşmedi.")
 
-            mesajlar.append(f"⚓ <b>{etiket}</b> (Toplam: {int(toplam)})")
-            mesajlar.append(
-                f"  ▫️ Tanker: {int(tanker)} | Konteyner: {int(konteyner)} | Kuru Yük: {int(kuru)}\n"
-            )
-            bulunan += 1
-        else:
-            print(f"{etiket} için eşleşen kayıt bulunamadı.")
-
+    # Süveyş veya herhangi bir boğaz geldiyse mesajı direkt basar
     if bulunan > 0:
         mesajlar.append(
             "📊 <b>Detaylı Grafikler ve Canlı Panel:</b>\n👉 https://ismail-piyasa.streamlit.app/"
         )
         send_telegram("\n".join(mesajlar))
-        print("Telegram mesajı başarıyla iletildi.")
+        print(f"Başarılı: {bulunan} boğaz bilgisi Telegram'a iletildi.")
+    else:
+        print("Kritik: Hiçbir boğazdan veri alınamadı.")
 
 
 if __name__ == "__main__":
