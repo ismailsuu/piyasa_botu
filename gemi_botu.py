@@ -21,11 +21,12 @@ def send_telegram(mesaj):
         res = requests.post(url, json=payload, timeout=15)
         print("Telegram Yanıtı:", res.status_code, res.text)
     except Exception as e:
-        print("Telegram gönderim hatası:", e)
+        print("Telegram hatası:", e)
 
 
 def main():
-    endpoint = "https://services9.arcgis.com/fqDgCAUbok0cvzq7/arcgis/rest/services/PortWatch_Chokepoints_Daily_Transit_Data/FeatureServer/0/query"
+    # IMF PortWatch Resmi ArcGIS Endpoint'i
+    endpoint = "https://services9.arcgis.com/weJ1QsnbMYJlCHdG/arcgis/rest/services/Daily_Chokepoints_Data/FeatureServer/0/query"
 
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -43,11 +44,11 @@ def main():
     bulunan = 0
 
     for pid, etiket in noktalar:
-        # Doğrudan ArcGIS'in tanıdığı portid alanı sorgulanır
+        # n_total > 0 şartı sayesinde boş/işlenmemiş son günleri atlayıp dolu en son günü alır
         params = {
-            "where": f"portid='{pid}'",
-            "outFields": "*",
-            "orderByFields": "date desc",
+            "where": f"portid='{pid}' AND n_total > 0",
+            "outFields": "date,n_total,n_tanker,n_container,n_dry_bulk",
+            "orderByFields": "date DESC",
             "resultRecordCount": 1,
             "f": "json",
         }
@@ -56,40 +57,13 @@ def main():
             r = requests.get(endpoint, params=params, headers=headers, timeout=15)
             if r.status_code == 200:
                 data = r.json()
-                
-                # ArcGIS hata dönerse sebebini loga bas
-                if "error" in data:
-                    print(f"{etiket} API Hatası:", data["error"].get("message"))
-                    continue
-
                 features = data.get("features", [])
                 if features:
                     attr = features[0].get("attributes", {})
-
-                    toplam = (
-                        attr.get("n_total")
-                        or attr.get("transit_calls")
-                        or attr.get("total_calls")
-                        or 0
-                    )
-                    tanker = (
-                        attr.get("n_tanker")
-                        or attr.get("tanker_calls")
-                        or attr.get("tankers")
-                        or 0
-                    )
-                    konteyner = (
-                        attr.get("n_container")
-                        or attr.get("container_calls")
-                        or attr.get("containers")
-                        or 0
-                    )
-                    kuru = (
-                        attr.get("n_dry_bulk")
-                        or attr.get("dry_bulk_calls")
-                        or attr.get("cargo_calls")
-                        or 0
-                    )
+                    toplam = attr.get("n_total") or 0
+                    tanker = attr.get("n_tanker") or 0
+                    konteyner = attr.get("n_container") or 0
+                    kuru = attr.get("n_dry_bulk") or 0
 
                     mesajlar.append(f"⚓ <b>{etiket}</b> (Toplam: {int(toplam)})")
                     mesajlar.append(
@@ -97,7 +71,7 @@ def main():
                     )
                     bulunan += 1
                 else:
-                    print(f"{etiket} için {pid} ile kayıt bulunamadı.")
+                    print(f"{etiket} için n_total > 0 şartına uyan kayıt dönmedi.")
             else:
                 print(f"{etiket} HTTP Hatası: {r.status_code}")
         except Exception as e:
@@ -108,9 +82,9 @@ def main():
             "📊 <b>Detaylı Grafikler ve Canlı Panel:</b>\n👉 https://ismail-piyasa.streamlit.app/"
         )
         send_telegram("\n".join(mesajlar))
-        print("Telegram'a başarıyla iletildi.")
+        print("Telegram mesajı başarıyla gönderildi!")
     else:
-        print("Veri bulunamadığı için mesaj atılmadı.")
+        print("Kayıt bulunamadığı için mesaj atılmadı.")
 
 
 if __name__ == "__main__":
