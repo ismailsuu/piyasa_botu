@@ -4,6 +4,7 @@ import requests
 BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
+
 def send_telegram(mesaj):
     if not BOT_TOKEN or not CHAT_ID:
         print("Hata: TELEGRAM_TOKEN veya TELEGRAM_CHAT_ID bulunamadı!")
@@ -22,16 +23,16 @@ def send_telegram(mesaj):
     except Exception as e:
         print("Telegram hatası:", e)
 
+
 def main():
-    # Token istemeyen, ArcGIS Hub üzerinden sağlanan resmi Chokepoints sorgu servisi
+    # Süveyş'i getiren doğrulanmış servis adresi
     endpoint = "https://services9.arcgis.com/weJ1QsnbMYJlCHdG/arcgis/rest/services/Daily_Chokepoints_Data/FeatureServer/0/query"
 
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Accept": "application/json",
     }
 
-    # Süveyş'i getiren kesin portid eşleşmeleri ve alternatifleri
     noktalar = [
         ("Süveyş Kanalı", ["chokepoint1"]),
         ("Babülmendep Boğazı", ["chokepoint2"]),
@@ -45,31 +46,28 @@ def main():
     for etiket, id_listesi in noktalar:
         kayit = None
         for pid in id_listesi:
+            # Doğrudan dolu kaydı çeken sorgu yapısı
             params = {
-                "where": f"portid='{pid}'",
+                "where": f"portid='{pid}' AND n_total > 0",
                 "outFields": "date,n_total,n_tanker,n_container,n_dry_bulk",
                 "orderByFields": "date DESC",
                 "resultRecordCount": 1,
-                "f": "json"
+                "f": "json",
             }
             try:
                 r = requests.get(endpoint, params=params, headers=headers, timeout=15)
                 data = r.json()
-                if "features" in data and len(data["features"]) > 0:
-                    attr = data["features"][0].get("attributes", {})
-                    # Eğer son gün 0 ise, dolu olan son günü almak için n_total > 0 ile ara
-                    if (attr.get("n_total") or 0) == 0:
-                        params["where"] = f"portid='{pid}' AND n_total > 0"
-                        r_dolu = requests.get(endpoint, params=params, headers=headers, timeout=15)
-                        data_dolu = r_dolu.json()
-                        if "features" in data_dolu and len(data_dolu["features"]) > 0:
-                            kayit = data_dolu["features"][0].get("attributes", {})
-                            break
-                    else:
-                        kayit = attr
-                        break
+
+                if "error" in data:
+                    print(f"{etiket} ({pid}) API Hatası:", data["error"].get("message"))
+                    continue
+
+                features = data.get("features", [])
+                if features:
+                    kayit = features[0].get("attributes", {})
+                    break
             except Exception as e:
-                print(f"{etiket} ({pid}) hatası:", e)
+                print(f"{etiket} ({pid}) bağlantı hatası:", e)
 
         if kayit:
             toplam = kayit.get("n_total") or 0
@@ -85,7 +83,6 @@ def main():
         else:
             print(f"{etiket} için kayıt bulunamadı.")
 
-    # En az 1 boğaz bile çekilse mesajı Telegram'a gönder
     if bulunan > 0:
         mesajlar.append(
             "📊 <b>Detaylı Grafikler ve Canlı Panel:</b>\n👉 https://ismail-piyasa.streamlit.app/"
@@ -93,7 +90,8 @@ def main():
         send_telegram("\n".join(mesajlar))
         print(f"Başarılı: {bulunan} boğaz Telegram'a iletildi.")
     else:
-        print("Boğaz verisi alınamadı.")
+        print("Hiçbir boğazdan veri alınamadı.")
+
 
 if __name__ == "__main__":
     main()
