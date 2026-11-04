@@ -1,4 +1,5 @@
 import os
+import io
 import requests
 import pandas as pd
 
@@ -26,52 +27,31 @@ def send_telegram(mesaj):
 def fetch_portwatch_data():
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        "Accept": "*/*",
+        "Accept": "text/csv,application/json,*/*",
     }
 
-    # Alternatif 1: IMF PortWatch doğrudan katman sorgu URL'leri
-    endpoints = [
-        "https://services9.arcgis.com/weJ1QsnbMYJlCHdG/ArcGIS/rest/services/PortWatch_Daily_Chokepoints_Data/FeatureServer/0/query",
-        "https://services9.arcgis.com/weJ1QsnbMYJlCHdG/ArcGIS/rest/services/PortWatch_Chokepoints_Daily/FeatureServer/0/query",
-        "https://services9.arcgis.com/weJ1QsnbMYJlCHdG/arcgis/rest/services/Daily_Chokepoint_Data/FeatureServer/0/query",
+    # REST query yerine doğrudan statik OpenData CSV bağlantıları
+    csv_sources = [
+        "https://opendata.arcgis.com/datasets/3da2b9ca97684916b75c4013f95d18ab_0.csv",
+        "https://hub.arcgis.com/datasets/3da2b9ca97684916b75c4013f95d18ab_0.csv",
+        "https://portwatch.imf.org/datasets/3da2b9ca97684916b75c4013f95d18ab_0.csv"
     ]
 
-    for ep in endpoints:
-        print(f"Denetleniyor: {ep}...")
-        params = {
-            "where": "1=1",
-            "outFields": "*",
-            "returnGeometry": "false",
-            "resultRecordCount": "100",
-            "f": "pjson"
-        }
+    for url in csv_sources:
         try:
-            r = requests.get(ep, headers=headers, params=params, timeout=15)
-            if r.status_code == 200:
-                data = r.json()
-                if "features" in data and len(data["features"]) > 0:
-                    rows = [item["attributes"] for item in data["features"]]
-                    print(f"Başarılı! {len(rows)} kayıt alındı.")
-                    return pd.DataFrame(rows)
-        except Exception:
-            continue
-
-    # Alternatif 2: ArcGIS Hub API v3 (Download URL doğrudan alma)
-    try:
-        print("ArcGIS Hub API v3 üzerinden dosya URL'si aranıyor...")
-        hub_api = "https://hub.arcgis.com/api/v3/datasets/3da2b9ca97684916b75c4013f95d18ab_0"
-        r_hub = requests.get(hub_api, headers=headers, timeout=15)
-        if r_hub.status_code == 200:
-            hub_json = r_hub.json()
-            download_url = hub_json.get("data", {}).get("attributes", {}).get("sourceUrl") or \
-                           hub_json.get("data", {}).get("links", {}).get("downloadLink")
-            if download_url:
-                print(f"İndirme bağlantısı bulundu: {download_url}")
-                df_hub = pd.read_csv(download_url)
-                if not df_hub.empty:
-                    return df_hub
-    except Exception as e:
-        print(f"Hub indirme hatası: {e}")
+            print(f"PortWatch CSV indiriliyor: {url}...")
+            r = requests.get(url, headers=headers, timeout=40, allow_redirects=True)
+            
+            if r.status_code == 200 and not r.text.strip().lower().startswith("<!doctype html"):
+                # Gelen metin geçerli bir tablo mu kontrol et
+                df = pd.read_csv(io.StringIO(r.text))
+                if not df.empty and len(df) > 10:
+                    print(f"Başarılı! {len(df)} satır veri indirildi.")
+                    return df
+            else:
+                print(f"Kaynak yanıt vermedi veya HTML döndü: HTTP {r.status_code}")
+        except Exception as e:
+            print(f"İndirme hatası ({url}): {e}")
 
     return pd.DataFrame()
 
@@ -90,6 +70,8 @@ def main():
 
     if not df.empty:
         df.columns = [str(col).lower().strip() for col in df.columns]
+        
+        # Tarih sütununu belirle ve sırala
         date_col = next((c for c in ["date", "datetime", "record_date"] if c in df.columns), None)
         if date_col:
             try:
@@ -108,8 +90,17 @@ def main():
                 for kelime in kelimeler:
                     filtre = df[df[id_col].astype(str).str.lower().str.contains(kelime, na=False)]
                     if not filtre.empty:
-                        kayit = filtre.iloc[0]
-                        break
+                        # En güncel geçerli satırı al
+                        for _, satir in filtre.iterrows():
+                            toplam_val = satir.get("n_total") or satir.get("total_calls") or satir.get("transit_calls") or 0
+                            try:
+                                if float(toplam_val) > 0:
+                                    kayit = satir
+                                    break
+                            except (ValueError, TypeError):
+                                continue
+                        if kayit is not None:
+                            break
 
                 if kayit is not None:
                     def safe_int(val):
@@ -119,9 +110,9 @@ def main():
                             return 0
 
                     toplam = safe_int(kayit.get("n_total") or kayit.get("total_calls") or kayit.get("transit_calls") or 0)
-                    tanker = safe_int(kayit.get("n_tanker") or kayit.get("tanker_calls") or 0)
-                    konteyner = safe_int(kayit.get("n_container") or kayit.get("container_calls") or 0)
-                    kuru = safe_int(kayit.get("n_dry_bulk") or kayit.get("dry_bulk_calls") or 0)
+                    tanker = safe_int(kayit.get("n_tanker") or kayit.get("tanker_calls") or kayit.get("tankers") or 0)
+                    konteyner = safe_int(kayit.get("n_container") or kayit.get("container_calls") or kayit.get("containers") or 0)
+                    kuru = safe_int(kayit.get("n_dry_bulk") or kayit.get("dry_bulk_calls") or kayit.get("cargo_calls") or 0)
 
                     tarih_str = ""
                     if pd.notna(kayit.get("parsed_date")):
@@ -131,15 +122,15 @@ def main():
                     mesajlar.append(f"   ▫️ Tanker: {tanker} | Konteyner: {konteyner} | Kuru Yük: {kuru}\n")
                     bulunan += 1
 
-    # PortWatch tamamen erişilmez durumdaysa fallback (bilgilendirme) mesajı gönder
+    # Hiçbir veri çekilemediyse fallback mesajı gönder
     if bulunan == 0:
-        print("Uyarı: IMF PortWatch API verisi alınamadı, özet bilgilendirme gönderiliyor.")
-        mesajlar.append("⚠️ <i>IMF PortWatch açık veri servisinde anlık güncelleme/erişim kesintisi mevcut.</i>\n")
-        mesajlar.append("📊 Güncel grafikleri ve geçmiş analizleri Streamlit paneli üzerinden inceleyebilirsiniz.")
+        print("Veri eşleştirilemedi, fallback mesajı gönderiliyor.")
+        mesajlar.append("⚠️ <i>IMF PortWatch veri akışında geçici gecikme yaşanıyor.</i>\n")
+        mesajlar.append("Detaylı analiz için paneli ziyaret edebilirsiniz.")
 
-    mesajlar.append("\n🔗 <b>Canlı Panel:</b> https://ismail-piyasa.streamlit.app/")
+    mesajlar.append("📊 <b>Canlı Panel:</b> https://ismail-piyasa.streamlit.app/")
     send_telegram("\n".join(mesajlar))
-    print("Telegram bildirimi gönderildi.")
+    print(f"Tamamlandı: {bulunan} boğaz bildirildi.")
 
 if __name__ == "__main__":
     main()
