@@ -1,5 +1,4 @@
 import os
-import io
 import requests
 import pandas as pd
 
@@ -20,38 +19,66 @@ def send_telegram(mesaj):
     }
     try:
         res = requests.post(url, json=payload, timeout=20)
-        print("Telegram Yanıtı:", res.status_code, res.text)
+        print("Telegram Yanıtı:", res.status_code)
     except Exception as e:
         print("Telegram gönderim hatası:", e)
 
 def fetch_portwatch_data():
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        "Accept": "text/csv,application/json,*/*",
+        "Accept": "application/json",
+        "Referer": "https://portwatch.imf.org/",
     }
 
-    # REST query yerine doğrudan statik OpenData CSV bağlantıları
-    csv_sources = [
-        "https://opendata.arcgis.com/datasets/3da2b9ca97684916b75c4013f95d18ab_0.csv",
-        "https://hub.arcgis.com/datasets/3da2b9ca97684916b75c4013f95d18ab_0.csv",
-        "https://portwatch.imf.org/datasets/3da2b9ca97684916b75c4013f95d18ab_0.csv"
+    # Doğrulanmış tam servis ve katman adresi
+    url = "https://services9.arcgis.com/weJ1QsnbMYJlCHdG/arcgis/rest/services/Daily_Chokepoints_Data/FeatureServer/0/query"
+    
+    # Sunucu tarafında timeout yaratmayan en hafif sorgu parametreleri
+    params_list = [
+        # 1. En güncel verileri en hızlı çeken OBJECTID azalan sıralı sorgu
+        {
+            "where": "1=1",
+            "outFields": "*",
+            "orderByFields": "OBJECTID DESC",
+            "resultRecordCount": "100",
+            "returnGeometry": "false",
+            "f": "json"
+        },
+        # 2. Alternatif: Tarih sıralamalı
+        {
+            "where": "1=1",
+            "outFields": "*",
+            "orderByFields": "date DESC",
+            "resultRecordCount": "100",
+            "returnGeometry": "false",
+            "f": "json"
+        },
+        # 3. Alternatif: Sıralamasız düz küçük paket
+        {
+            "where": "1=1",
+            "outFields": "*",
+            "resultRecordCount": "100",
+            "returnGeometry": "false",
+            "f": "json"
+        }
     ]
 
-    for url in csv_sources:
+    for idx, params in enumerate(params_list, 1):
         try:
-            print(f"PortWatch CSV indiriliyor: {url}...")
-            r = requests.get(url, headers=headers, timeout=40, allow_redirects=True)
-            
-            if r.status_code == 200 and not r.text.strip().lower().startswith("<!doctype html"):
-                # Gelen metin geçerli bir tablo mu kontrol et
-                df = pd.read_csv(io.StringIO(r.text))
-                if not df.empty and len(df) > 10:
-                    print(f"Başarılı! {len(df)} satır veri indirildi.")
-                    return df
+            print(f"Hafif sorgu gönderiliyor (Deneme {idx})...")
+            r = requests.get(url, headers=headers, params=params, timeout=20)
+            if r.status_code == 200:
+                data = r.json()
+                if "features" in data and len(data["features"]) > 0:
+                    rows = [item["attributes"] for item in data["features"]]
+                    print(f"Başarılı! {len(rows)} satır veri alındı.")
+                    return pd.DataFrame(rows)
+                else:
+                    print(f"Kayıt gelmedi (Deneme {idx}):", data.get("error", "Boş liste"))
             else:
-                print(f"Kaynak yanıt vermedi veya HTML döndü: HTTP {r.status_code}")
+                print(f"HTTP {r.status_code} alındı.")
         except Exception as e:
-            print(f"İndirme hatası ({url}): {e}")
+            print(f"Deneme {idx} hatası: {e}")
 
     return pd.DataFrame()
 
@@ -71,7 +98,7 @@ def main():
     if not df.empty:
         df.columns = [str(col).lower().strip() for col in df.columns]
         
-        # Tarih sütununu belirle ve sırala
+        # Tarih sütunu çözümleme
         date_col = next((c for c in ["date", "datetime", "record_date"] if c in df.columns), None)
         if date_col:
             try:
@@ -90,7 +117,6 @@ def main():
                 for kelime in kelimeler:
                     filtre = df[df[id_col].astype(str).str.lower().str.contains(kelime, na=False)]
                     if not filtre.empty:
-                        # En güncel geçerli satırı al
                         for _, satir in filtre.iterrows():
                             toplam_val = satir.get("n_total") or satir.get("total_calls") or satir.get("transit_calls") or 0
                             try:
@@ -110,9 +136,9 @@ def main():
                             return 0
 
                     toplam = safe_int(kayit.get("n_total") or kayit.get("total_calls") or kayit.get("transit_calls") or 0)
-                    tanker = safe_int(kayit.get("n_tanker") or kayit.get("tanker_calls") or kayit.get("tankers") or 0)
-                    konteyner = safe_int(kayit.get("n_container") or kayit.get("container_calls") or kayit.get("containers") or 0)
-                    kuru = safe_int(kayit.get("n_dry_bulk") or kayit.get("dry_bulk_calls") or kayit.get("cargo_calls") or 0)
+                    tanker = safe_int(kayit.get("n_tanker") or kayit.get("tanker_calls") or 0)
+                    konteyner = safe_int(kayit.get("n_container") or kayit.get("container_calls") or 0)
+                    kuru = safe_int(kayit.get("n_dry_bulk") or kayit.get("dry_bulk_calls") or 0)
 
                     tarih_str = ""
                     if pd.notna(kayit.get("parsed_date")):
@@ -122,15 +148,13 @@ def main():
                     mesajlar.append(f"   ▫️ Tanker: {tanker} | Konteyner: {konteyner} | Kuru Yük: {kuru}\n")
                     bulunan += 1
 
-    # Hiçbir veri çekilemediyse fallback mesajı gönder
     if bulunan == 0:
-        print("Veri eşleştirilemedi, fallback mesajı gönderiliyor.")
+        print("Uyarı: Boğaz verisi eşleştirilemedi.")
         mesajlar.append("⚠️ <i>IMF PortWatch veri akışında geçici gecikme yaşanıyor.</i>\n")
-        mesajlar.append("Detaylı analiz için paneli ziyaret edebilirsiniz.")
 
     mesajlar.append("📊 <b>Canlı Panel:</b> https://ismail-piyasa.streamlit.app/")
     send_telegram("\n".join(mesajlar))
-    print(f"Tamamlandı: {bulunan} boğaz bildirildi.")
+    print(f"İşlem Tamamlandı. {bulunan} boğaz bildirildi.")
 
 if __name__ == "__main__":
     main()
