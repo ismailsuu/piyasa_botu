@@ -1,5 +1,4 @@
 import os
-import io
 import requests
 import pandas as pd
 
@@ -31,85 +30,57 @@ def fetch_portwatch_data():
         "Referer": "https://portwatch.imf.org/",
     }
 
-    base_service_url = "https://services9.arcgis.com/weJ1QsnbMYJlCHdG/arcgis/rest/services/Daily_Chokepoints_Data/FeatureServer"
+    query_url = "https://services9.arcgis.com/weJ1QsnbMYJlCHdG/arcgis/rest/services/Daily_Chokepoints_Data/FeatureServer/0/query"
+
+    # Tüm veritabanını çekmek yerine sadece hedef boğazları ve gerekli alanları filtreliyoruz
+    # Böylece sunucu zaman aşımına (Timeout) uğramaz ve anında döner
+    target_pids = "('chokepoint1', 'chokepoint2', 'chokepoint3', 'chokepoint5', 'chokepoint6', 'chokepoint8')"
     
-    # 1. Aşama: Servisin katman ve tablo yapısını incele
-    target_ids = []
-    try:
-        print(f"Servis katman yapısı sorgulanıyor: {base_service_url}?f=json")
-        r_service = requests.get(f"{base_service_url}?f=json", headers=headers, timeout=20)
-        if r_service.status_code == 200:
-            s_info = r_service.json()
-            layers = s_info.get("layers", [])
-            tables = s_info.get("tables", [])
-            
-            for l in layers:
-                if "id" in l:
-                    target_ids.append((l["id"], l.get("name", "Layer")))
-            for t in tables:
-                if "id" in t:
-                    target_ids.append((t["id"], t.get("name", "Table")))
-            
-            print(f"Tespit edilen hedef katman ve tablolar: {target_ids}")
-    except Exception as e:
-        print(f"Katman yapısı sorgulanırken hata: {e}")
-
-    # Eğer servis yapısından ID alınamazsa yaygın indeksleri dene
-    if not target_ids:
-        target_ids = [(0, "Default-0"), (1, "Default-1"), (2, "Default-2")]
-
-    # 2. Aşama: Bulunan katmanları sırayla sorgula
-    for layer_id, layer_name in target_ids:
-        query_url = f"{base_service_url}/{layer_id}/query"
-        print(f"Veri sorgulanıyor: {layer_name} (ID: {layer_id}) -> {query_url}")
-        
-        params = {
+    attempts = [
+        # 1. Deneme: Boğaz kimlikleriyle hızlı hedef sorgusu
+        {
+            "where": f"portid IN {target_pids}",
+            "outFields": "portid,date,n_total,n_tanker,n_container,n_dry_bulk",
+            "returnGeometry": "false",
+            "resultRecordCount": "200",
+            "f": "json"
+        },
+        # 2. Deneme: Sütun adları farklıysa tüm alanlarla hedef filtre
+        {
+            "where": f"portid IN {target_pids}",
+            "outFields": "*",
+            "returnGeometry": "false",
+            "resultRecordCount": "200",
+            "f": "json"
+        },
+        # 3. Deneme: Küçük kayıt sayılı genel sorgu (Timeout önleyici sınır)
+        {
             "where": "1=1",
             "outFields": "*",
             "returnGeometry": "false",
-            "resultRecordCount": "2000",
-            "orderByFields": "date DESC",
+            "resultRecordCount": "250",
             "f": "json"
         }
-        
-        try:
-            r = requests.get(query_url, headers=headers, params=params, timeout=30)
-            data = r.json()
-
-            # Sıralama parametresi hata verirse parametresiz tekrar dene
-            if "error" in data:
-                params.pop("orderByFields", None)
-                r = requests.get(query_url, headers=headers, params=params, timeout=30)
-                data = r.json()
-
-            if "features" in data and len(data["features"]) > 0:
-                rows = [item["attributes"] for item in data["features"]]
-                df_candidate = pd.DataFrame(rows)
-                cols = [str(c).lower() for c in df_candidate.columns]
-                
-                # Boğaz veya transit bilgisi içeren doğru katman mı?
-                if any(k in cols for k in ["n_total", "total_calls", "transit_calls", "chokepoint", "portid"]):
-                    print(f"Başarılı: '{layer_name}' katmanından {len(df_candidate)} kayıt çekildi.")
-                    return df_candidate
-        except Exception as e:
-            print(f"ID {layer_id} sorgulama hatası: {e}")
-
-    # 3. Aşama: Yedek doğrudan Hub CSV akışı
-    print("REST API sorguları sonuçsuz kaldı, doğrudan açık veri CSV uç noktaları deneniyor...")
-    csv_fallbacks = [
-        "https://hub.arcgis.com/api/v3/datasets/3da2b9ca97684916b75c4013f95d18ab_0/downloads/data?format=csv&spatialRefId=4326&where=1%3D1",
-        "https://portwatch.imf.org/api/v3/datasets/3da2b9ca97684916b75c4013f95d18ab_0/downloads/data?format=csv"
     ]
-    for url in csv_fallbacks:
+
+    for i, params in enumerate(attempts, 1):
+        print(f"Hafifletilmiş sorgu deneniyor (Deneme {i})...")
         try:
-            r_csv = requests.get(url, headers={"User-Agent": headers["User-Agent"]}, timeout=30)
-            if r_csv.status_code == 200 and not r_csv.text.strip().lower().startswith("<!doctype html"):
-                df_temp = pd.read_csv(io.StringIO(r_csv.text))
-                if not df_temp.empty and len(df_temp) > 5:
-                    print("CSV yedeğinden veri başarıyla indirildi.")
-                    return df_temp
-        except Exception:
-            continue
+            r = requests.get(query_url, headers=headers, params=params, timeout=25)
+            if r.status_code == 200:
+                data = r.json()
+                if "features" in data and len(data["features"]) > 0:
+                    rows = [item["attributes"] for item in data["features"]]
+                    print(f"Başarılı! Toplam {len(rows)} adet güncel boğaz kaydı çekildi.")
+                    return pd.DataFrame(rows)
+                else:
+                    print(f"Kayıt gelmedi: {data.get('error', 'Boş veri')}")
+            else:
+                print(f"HTTP Hatası: {r.status_code}")
+        except requests.exceptions.Timeout:
+            print("Zaman aşımı (Timeout) oluştu, sonraki sorguya geçiliyor...")
+        except Exception as e:
+            print(f"Sorgu hatası: {e}")
 
     return pd.DataFrame()
 
@@ -117,7 +88,7 @@ def main():
     df = fetch_portwatch_data()
 
     if df.empty:
-        print("Kritik Hata: PortWatch veri kaynaklarından geçerli tablo alınamadı.")
+        print("Kritik Hata: PortWatch veri kaynağından kayıt alınamadı.")
         return
 
     # Sütun isimlerini normalize et
