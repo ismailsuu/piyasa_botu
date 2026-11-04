@@ -1,5 +1,4 @@
 import os
-import io
 import requests
 import pandas as pd
 
@@ -25,46 +24,49 @@ def send_telegram(mesaj):
         print("Telegram gönderim hatası:", e)
 
 def main():
-    # Gerçek tarayıcı başlıkları (WAF engellerini azaltmak için)
+    # Gerçek tarayıcı başlıkları (WAF engellerini önlemek için)
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.9,tr;q=0.8",
+        "Accept": "application/json",
         "Referer": "https://portwatch.imf.org/",
     }
 
-    # PortWatch ve ArcGIS Hub açık veri indirme bağlantıları
-    csv_urls = [
-        "https://hub.arcgis.com/api/v3/datasets/3da2b9ca97684916b75c4013f95d18ab_0/downloads/data?format=csv&spatialRefId=4326&where=1%3D1",
-        "https://portwatch.imf.org/api/v3/datasets/3da2b9ca97684916b75c4013f95d18ab_0/downloads/data?format=csv",
-        "https://services9.arcgis.com/weJ1QsnbMYJlCHdG/arcgis/rest/services/PortWatch_Chokepoints_Daily/FeatureServer/0/query?where=1%3D1&outFields=*&f=csv"
-    ]
+    # PortWatch ArcGIS FeatureServer doğrudan JSON sorgusu
+    api_url = "https://services9.arcgis.com/weJ1QsnbMYJlCHdG/arcgis/rest/services/PortWatch_Chokepoints_Daily/FeatureServer/0/query"
+    params = {
+        "where": "1=1",
+        "outFields": "*",
+        "orderByFields": "date DESC",
+        "resultRecordCount": "2000",
+        "f": "json"
+    }
 
     df = pd.DataFrame()
-    for url in csv_urls:
-        try:
-            print(f"Veri çekiliyor: {url[:60]}...")
-            r = requests.get(url, headers=headers, timeout=35)
-            
-            # Sunucu HTML hata sayfası dönerse atla
-            if r.status_code == 200 and not r.text.strip().lower().startswith("<!doctype html"):
-                df_temp = pd.read_csv(io.StringIO(r.text))
-                if not df_temp.empty and len(df_temp) > 5:
-                    df = df_temp
-                    print("Veri başarıyla indirildi.")
-                    break
-        except Exception as e:
-            print(f"Bağlantı denemesi başarısız ({e})")
-            continue
+    try:
+        print("ArcGIS FeatureServer üzerinden veri çekiliyor...")
+        r = requests.get(api_url, headers=headers, params=params, timeout=30)
+        
+        if r.status_code == 200:
+            data = r.json()
+            if "features" in data and len(data["features"]) > 0:
+                rows = [item["attributes"] for item in data["features"]]
+                df = pd.DataFrame(rows)
+                print(f"Veri başarıyla indirildi. Toplam kayıt: {len(df)}")
+            else:
+                print("API yanıt verdi fakat kayıt bulunamadı:", data.get("error", "Boş liste"))
+        else:
+            print(f"API Hatası: HTTP {r.status_code}")
+    except Exception as e:
+        print(f"Bağlantı hatası: {e}")
 
     if df.empty:
-        print("Kritik Hata: PortWatch veri kaynaklarından CSV dosyası temin edilemedi.")
+        print("Kritik Hata: PortWatch veri kaynağından kayıt alınamadı.")
         return
 
     # Sütun isimlerini normalize et
     df.columns = [str(col).lower().strip() for col in df.columns]
 
-    # Tarih formatını ayarla ve güncelden eskiye sırala
+    # Unix timestamp (milisaniye) formatını tarihe çevir
     if "date" in df.columns:
         try:
             df["date"] = pd.to_datetime(df["date"], unit="ms")
@@ -82,7 +84,7 @@ def main():
     id_col = next((col for col in ["portid", "chokepoint", "chokepoint_name", "name"] if col in df.columns), None)
 
     if not id_col:
-        print("CSV dosyasında boğaz kimlik/isim (portid/name) sütunu bulunamadı.")
+        print(f"Hata: Boğaz kimlik/isim sütunu bulunamadı. Mevcut sütunlar: {list(df.columns)}")
         return
 
     mesajlar = ["🚢 <b>IMF PortWatch Deniz Trafiği Raporu</b>\n"]
