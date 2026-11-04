@@ -30,40 +30,63 @@ def fetch_portwatch_data():
         "Referer": "https://portwatch.imf.org/",
     }
 
-    # PortWatch'ın doğrulanmış ArcGIS FeatureServer sorgu uç noktası
-    query_url = "https://services9.arcgis.com/weJ1QsnbMYJlCHdG/arcgis/rest/services/PortWatch_daily_chokepoints_data/FeatureServer/0/query"
-    
-    params = {
-        "where": "1=1",
-        "outFields": "*",
-        "returnGeometry": "false",
-        "resultRecordCount": "2000",
-        "orderByFields": "date DESC",
-        "f": "json"
-    }
+    item_id = "3da2b9ca97684916b75c4013f95d18ab"
+    candidate_urls = []
 
-    print("PortWatch verisi çekiliyor...")
+    # 1. ArcGIS Katalog API'si üzerinden güncel FeatureServer URL'sini dinamik al
     try:
-        r = requests.get(query_url, headers=headers, params=params, timeout=30)
-        if r.status_code == 200:
-            data = r.json()
-            # Eğer orderByFields desteklenmezse parametresiz dene
-            if "error" in data:
-                print("Sıralama parametresi olmadan tekrar deneniyor...")
-                params.pop("orderByFields", None)
-                r = requests.get(query_url, headers=headers, params=params, timeout=30)
-                data = r.json()
-
-            if "features" in data and len(data["features"]) > 0:
-                rows = [item["attributes"] for item in data["features"]]
-                print(f"Veri başarıyla indirildi. Toplam satır: {len(rows)}")
-                return pd.DataFrame(rows)
-            else:
-                print("API yanıt verdi fakat kayıt bulunamadı:", data.get("error", data))
-        else:
-            print(f"API Hatası: HTTP {r.status_code}")
+        meta_url = f"https://www.arcgis.com/sharing/rest/content/items/{item_id}?f=json"
+        print("ArcGIS katalog metaverisi sorgulanıyor...")
+        r_meta = requests.get(meta_url, headers=headers, timeout=20)
+        if r_meta.status_code == 200:
+            meta = r_meta.json()
+            svc_url = meta.get("url")
+            if svc_url:
+                svc_url = svc_url.rstrip("/")
+                if not svc_url.endswith("/0"):
+                    svc_url = f"{svc_url}/0"
+                candidate_urls.append(f"{svc_url}/query")
+                print(f"Metaveriden tespit edilen dinamik URL: {svc_url}/query")
     except Exception as e:
-        print(f"Bağlantı hatası: {e}")
+        print(f"Metaveri sorgulanırken hata oluştu: {e}")
+
+    # 2. Yedek alternatif servis URL'leri
+    candidate_urls.extend([
+        "https://services9.arcgis.com/weJ1QsnbMYJlCHdG/arcgis/rest/services/PortWatch_Chokepoints_Daily/FeatureServer/0/query",
+        "https://services9.arcgis.com/weJ1QsnbMYJlCHdG/arcgis/rest/services/PortWatch_Chokepoint_Daily/FeatureServer/0/query",
+    ])
+
+    # Servisleri sırayla dene
+    for query_url in candidate_urls:
+        print(f"Veri çekiliyor: {query_url}")
+        params = {
+            "where": "1=1",
+            "outFields": "*",
+            "returnGeometry": "false",
+            "resultRecordCount": "2000",
+            "orderByFields": "date DESC",
+            "f": "json"
+        }
+        try:
+            r = requests.get(query_url, headers=headers, params=params, timeout=30)
+            if r.status_code == 200:
+                data = r.json()
+                # Eğer orderByFields hata verirse sıralama olmadan dene
+                if "error" in data:
+                    params.pop("orderByFields", None)
+                    r = requests.get(query_url, headers=headers, params=params, timeout=30)
+                    data = r.json()
+
+                if "features" in data and len(data["features"]) > 0:
+                    rows = [item["attributes"] for item in data["features"]]
+                    print(f"Veri başarıyla indirildi. Toplam kayıt: {len(rows)}")
+                    return pd.DataFrame(rows)
+                else:
+                    print(f"Kayıt alınamadı ({query_url}): {data.get('error', 'Boş liste')}")
+            else:
+                print(f"HTTP Hatası ({query_url}): {r.status_code}")
+        except Exception as e:
+            print(f"Bağlantı hatası ({query_url}): {e}")
 
     return pd.DataFrame()
 
@@ -71,7 +94,7 @@ def main():
     df = fetch_portwatch_data()
 
     if df.empty:
-        print("Kritik Hata: PortWatch veri kaynağından kayıt alınamadı.")
+        print("Kritik Hata: PortWatch veri kaynaklarının hiçbirinden kayıt alınamadı.")
         return
 
     # Sütun isimlerini normalize et
@@ -88,7 +111,6 @@ def main():
     else:
         df["parsed_date"] = None
 
-    # app.py ile birebir eşleşen boğaz listesi ve anahtar kelimeleri
     noktalar = [
         ("Süveyş Kanalı", ["suez", "chokepoint1"]),
         ("Babülmendep Boğazı", ["bab_el_mandeb", "bab el-mandeb", "chokepoint2"]),
