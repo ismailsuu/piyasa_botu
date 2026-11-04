@@ -1,4 +1,5 @@
 import io
+import os
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
@@ -39,31 +40,37 @@ LANG = {
         "tab_table": "📋 Veri Tablosu",
         "price_trend": "Fiyat Trendi",
         "candle_title": "Mum Grafiği",
-        "no_data": "için veri alınamadı.",
+        "no_data": "için veri bulunamadı.",
         "marine_title": "🚢 Kritik Boğazlar Deniz Trafiği Analizi",
-        "marine_sub": "Veriler IMF PortWatch açık servisinden canlı çekilmektedir.",
+        "marine_sub": "Veriler IMF PortWatch resmi veri tabanından derlenmektedir.",
         "marine_settings": "⚓ Deniz Trafiği Ayarları",
         "strait": "Boğaz / Geçit",
         "chokepoints": {
+            "İstanbul Boğazı": ["chokepoint3", "bosporus"],
             "Süveyş Kanalı": ["chokepoint1", "suez"],
-            "Babülmendep Boğazı": ["chokepoint2", "bab el-mandeb", "bab_el_mandeb"],
-            "Hürmüz Boğazı": ["chokepoint6", "chokepoint3", "hormuz"],
-            "Ümit Burnu": ["chokepoint8", "chokepoint5", "cape_of_good_hope", "cape of good hope"],
+            "Babülmendep Boğazı": ["chokepoint4", "mandeb"],
+            "Hürmüz Boğazı": ["chokepoint6", "hormuz"],
+            "Ümit Burnu": ["chokepoint7", "good hope", "cape"],
+            "Malakka Boğazı": ["chokepoint5", "malacca"],
+            "Panama Kanalı": ["chokepoint2", "panama"],
+            "Cebelitarık Boğazı": ["chokepoint8", "gibraltar"],
         },
-        "time_ranges": ["Son 1 Yıl", "Son 3 Yıl", "Son 5 Yıl", "Tüm Geçmiş (2019 - Günümüz)"],
         "spinner_text": "Veriler yükleniyor...",
-        "daily_total": "Son Günlük Toplam",
+        "total_transit": "Toplam Gemi Geçişi",
         "tanker": "Tanker",
         "container": "Konteyner",
         "dry_bulk": "Kuru Yük",
-        "tab_total": "📈 Toplam Geçiş Trendi",
+        "general_cargo": "Genel Kargo",
+        "roro": "Ro-Ro",
         "tab_types": "📊 Gemi Türleri Dağılımı",
-        "tab_raw": "📋 Ham Veri",
-        "chart_total_title": "Günlük Toplam Gemi Geçişi",
-        "chart_types_title": "Gemi Türlerine Göre Trend",
-        "daily_calls": "Günlük Geçiş Sayısı",
+        "tab_compare": "🌍 Küresel Boğazlar Sıralaması",
+        "tab_industries": "📦 Taşınan Kritik Sektörler",
+        "tab_raw": "📋 Veri Tablosu",
+        "chart_types_title": "Gemi Türü Dağılımı (Oransal)",
+        "chart_compare_title": "Dünya Çapında 28 Kritik Boğazın Trafik Karşılaştırması",
         "date": "Tarih",
-        "type": "Tür",
+        "type": "Gemi Türü",
+        "count": "Geçiş Sayısı",
     },
     "EN": {
         "menu_title": "🧭 Navigation",
@@ -88,29 +95,35 @@ LANG = {
         "candle_title": "Candlestick Chart",
         "no_data": "No data found for",
         "marine_title": "🚢 Chokepoints Maritime Traffic Analysis",
-        "marine_sub": "Live and historical transit data sourced from IMF PortWatch.",
+        "marine_sub": "Sourced from IMF PortWatch official database.",
         "marine_settings": "⚓ Maritime Settings",
         "strait": "Chokepoint / Strait",
         "chokepoints": {
+            "Bosporus Strait": ["chokepoint3", "bosporus"],
             "Suez Canal": ["chokepoint1", "suez"],
-            "Bab el-Mandeb Strait": ["chokepoint2", "bab el-mandeb", "bab_el_mandeb"],
-            "Strait of Hormuz": ["chokepoint6", "chokepoint3", "hormuz"],
-            "Cape of Good Hope": ["chokepoint8", "chokepoint5", "cape_of_good_hope", "cape of good hope"],
+            "Bab el-Mandeb Strait": ["chokepoint4", "mandeb"],
+            "Strait of Hormuz": ["chokepoint6", "hormuz"],
+            "Cape of Good Hope": ["chokepoint7", "good hope", "cape"],
+            "Malacca Strait": ["chokepoint5", "malacca"],
+            "Panama Canal": ["chokepoint2", "panama"],
+            "Gibraltar Strait": ["chokepoint8", "gibraltar"],
         },
-        "time_ranges": ["Last 1 Year", "Last 3 Years", "Last 5 Years", "All History (2019 - Present)"],
         "spinner_text": "Loading data...",
-        "daily_total": "Latest Daily Total",
+        "total_transit": "Total Vessel Transits",
         "tanker": "Tankers",
         "container": "Containers",
         "dry_bulk": "Dry Bulk",
-        "tab_total": "📈 Total Transit Trend",
+        "general_cargo": "General Cargo",
+        "roro": "Ro-Ro",
         "tab_types": "📊 Transit Breakdown by Type",
+        "tab_compare": "🌍 Global Chokepoints Ranking",
+        "tab_industries": "📦 Top Traded Commodities",
         "tab_raw": "📋 Raw Data",
-        "chart_total_title": "Daily Total Vessel Transits",
-        "chart_types_title": "Transit Trends by Vessel Type",
-        "daily_calls": "Daily Transit Count",
+        "chart_types_title": "Transit Share by Vessel Type",
+        "chart_compare_title": "Global Comparison of 28 Maritime Chokepoints",
         "date": "Date",
         "type": "Vessel Type",
+        "count": "Transit Count",
     },
 }
 
@@ -264,153 +277,135 @@ else:
     secilen_bogaz = st.sidebar.selectbox(t["strait"], list(chokepoints_dict.keys()))
     selected_pid_list = chokepoints_dict[secilen_bogaz]
 
-    secilen_aralik = st.sidebar.radio(
-        t["timeframe"],
-        t["time_ranges"],
-        index=3,
-    )
-
     @st.cache_data(ttl=3600)
-    def load_portwatch_history(pid_list):
-        # ArcGIS Hub ve PortWatch açık veri uç noktaları
-        csv_urls = [
-            "https://hub.arcgis.com/api/v3/datasets/3da2b9ca97684916b75c4013f95d18ab_0/downloads/data?format=csv&spatialRefId=4326&where=1%3D1",
+    def load_portwatch_data():
+        csv_file = "PortWatch_chokepoints_database.csv"
+        if os.path.exists(csv_file):
+            return pd.read_csv(csv_file)
+        
+        # Yerel dosya bulunamazsa internet kaynaklarını dene
+        fallback_urls = [
+            "https://hub.arcgis.com/api/v3/datasets/3da2b9ca97684916b75c4013f95d18ab_0/downloads/data?format=csv",
             "https://portwatch.imf.org/api/v3/datasets/3da2b9ca97684916b75c4013f95d18ab_0/downloads/data?format=csv"
         ]
-        
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-        }
-        
-        df = pd.DataFrame()
-        for url in csv_urls:
+        headers = {"User-Agent": "Mozilla/5.0"}
+        for url in fallback_urls:
             try:
-                r = requests.get(url, headers=headers, timeout=30)
+                r = requests.get(url, headers=headers, timeout=20)
                 if r.status_code == 200:
                     df = pd.read_csv(io.StringIO(r.text))
                     if not df.empty:
-                        break
+                        return df
             except Exception:
                 continue
-
-        if df.empty:
-            return pd.DataFrame()
-
-        # Sütun isimlerini normalize et
-        df.columns = [str(col).lower().strip() for col in df.columns]
-
-        id_col = next((col for col in ["portid", "chokepoint", "chokepoint_name", "name"] if col in df.columns), None)
-        if not id_col:
-            return pd.DataFrame()
-
-        # Boğaz ID'si veya İsmine göre filtrele
-        mask = df[id_col].astype(str).str.lower().apply(lambda x: any(pid in x for pid in pid_list))
-        df_filtered = df[mask].copy()
-
-        if df_filtered.empty:
-            return pd.DataFrame()
-
-        # Sütun uyumlulukları
-        if "n_total" not in df_filtered.columns:
-            df_filtered["n_total"] = df_filtered.get("transit_calls", df_filtered.get("total_calls", 0))
-        if "n_tanker" not in df_filtered.columns:
-            df_filtered["n_tanker"] = df_filtered.get("tanker_calls", df_filtered.get("tankers", 0))
-        if "n_container" not in df_filtered.columns:
-            df_filtered["n_container"] = df_filtered.get("container_calls", df_filtered.get("containers", 0))
-        if "n_dry_bulk" not in df_filtered.columns:
-            df_filtered["n_dry_bulk"] = df_filtered.get("dry_bulk_calls", df_filtered.get("cargo_calls", 0))
-
-        if "date" in df_filtered.columns:
-            try:
-                df_filtered["date"] = pd.to_datetime(df_filtered["date"], unit="ms")
-            except Exception:
-                df_filtered["date"] = pd.to_datetime(df_filtered["date"], errors="coerce")
-
-            df_filtered = df_filtered.dropna(subset=["date"])
-            
-            # Değerleri sayıya çevir
-            cols_to_numeric = ["n_total", "n_tanker", "n_container", "n_dry_bulk"]
-            for col in cols_to_numeric:
-                if col in df_filtered.columns:
-                    df_filtered[col] = pd.to_numeric(df_filtered[col], errors="coerce").fillna(0)
-
-            df_filtered = df_filtered[df_filtered["n_total"] > 0].sort_values("date").reset_index(drop=True)
-            return df_filtered
-            
         return pd.DataFrame()
 
     with st.spinner(t["spinner_text"]):
-        df_pw = load_portwatch_history(selected_pid_list)
+        df_pw = load_portwatch_data()
 
     if not df_pw.empty:
-        bugun = df_pw["date"].max()
-        if secilen_aralik == t["time_ranges"][0]:
-            df_filtre = df_pw[df_pw["date"] >= bugun - pd.DateOffset(years=1)]
-        elif secilen_aralik == t["time_ranges"][1]:
-            df_filtre = df_pw[df_pw["date"] >= bugun - pd.DateOffset(years=3)]
-        elif secilen_aralik == t["time_ranges"][2]:
-            df_filtre = df_pw[df_pw["date"] >= bugun - pd.DateOffset(years=5)]
-        else:
-            df_filtre = df_pw
+        # Sütun isimlerini normalize et
+        df_pw.columns = [str(c).strip() for c in df_pw.columns]
 
-        if df_filtre.empty:
+        id_col = "portid" if "portid" in df_pw.columns else "portname"
+        name_col = "portname" if "portname" in df_pw.columns else id_col
+
+        # Seçilen boğazı bul
+        mask = df_pw[id_col].astype(str).str.lower().apply(lambda x: any(pid in x for pid in selected_pid_list)) | \
+               df_pw[name_col].astype(str).str.lower().apply(lambda x: any(pid in x for pid in selected_pid_list))
+        
+        selected_row = df_pw[mask]
+
+        if selected_row.empty:
             st.warning(f"{secilen_bogaz} {t['no_data']}")
         else:
-            son_gun = df_filtre.iloc[-1]
-            g1, g2, g3, g4 = st.columns(4)
-            g1.metric(t["daily_total"], f"{int(son_gun.get('n_total', 0))}")
-            g2.metric(t["tanker"], f"{int(son_gun.get('n_tanker', 0))}")
-            g3.metric(t["container"], f"{int(son_gun.get('n_container', 0))}")
-            g4.metric(t["dry_bulk"], f"{int(son_gun.get('n_dry_bulk', 0))}")
+            row = selected_row.iloc[0]
 
-            t1, t2, t3 = st.tabs([t["tab_total"], t["tab_types"], t["tab_raw"]])
+            def to_int(val):
+                try:
+                    return int(float(val))
+                except Exception:
+                    return 0
 
-            with t1:
-                fig_trend = px.line(
-                    df_filtre,
-                    x="date",
-                    y="n_total",
-                    title=f"{secilen_bogaz} - {t['chart_total_title']} ({secilen_aralik})",
-                    labels={"date": t["date"], "n_total": t["daily_calls"]},
-                )
-                fig_trend.update_layout(hovermode="x unified")
-                st.plotly_chart(fig_trend, use_container_width=True)
+            # Gemi sayılarını al
+            toplam = to_int(row.get("vessel_count_total", row.get("n_total", 0)))
+            tanker = to_int(row.get("vessel_count_tanker", row.get("n_tanker", 0)))
+            konteyner = to_int(row.get("vessel_count_container", row.get("n_container", 0)))
+            kuru_yuk = to_int(row.get("vessel_count_dry_bulk", row.get("n_dry_bulk", 0)))
+            genel_kargo = to_int(row.get("vessel_count_general_cargo", row.get("n_general_cargo", 0)))
+            roro = to_int(row.get("vessel_count_RoRo", row.get("n_roro", 0)))
 
-            with t2:
-                df_filtre_renamed = df_filtre.rename(
-                    columns={
-                        "n_tanker": t["tanker"],
-                        "n_container": t["container"],
-                        "n_dry_bulk": t["dry_bulk"],
+            # Üst Metrik Kartları
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric(t["total_transit"], f"{toplam:,}")
+            m2.metric(t["tanker"], f"{tanker:,}")
+            m3.metric(t["container"], f"{konteyner:,}")
+            m4.metric(t["dry_bulk"], f"{kuru_yuk:,}")
+
+            tab_types, tab_compare, tab_industries, tab_raw = st.tabs([
+                t["tab_types"], t["tab_compare"], t["tab_industries"], t["tab_raw"]
+            ])
+
+            # TAB 1: Gemi Türleri Dağılımı (Donut Grafiği)
+            with tab_types:
+                breakdown_data = pd.DataFrame({
+                    t["type"]: [t["tanker"], t["container"], t["dry_bulk"], t["general_cargo"], t["roro"]],
+                    t["count"]: [tanker, konteyner, kuru_yuk, genel_kargo, roro]
+                })
+                breakdown_data = breakdown_data[breakdown_data[t["count"]] > 0]
+
+                fig_donut = px.pie(
+                    breakdown_data,
+                    names=t["type"],
+                    values=t["count"],
+                    hole=0.45,
+                    title=f"{secilen_bogaz} - {t['chart_types_title']}",
+                    color=t["type"],
+                    color_discrete_map={
+                        t["tanker"]: "#e74c3c",
+                        t["container"]: "#3498db",
+                        t["dry_bulk"]: "#f1c40f",
+                        t["general_cargo"]: "#9b59b6",
+                        t["roro"]: "#1abc9c",
                     }
                 )
-                color_map = {
-                    t["tanker"]: "#e74c3c",
-                    t["container"]: "#3498db",
-                    t["dry_bulk"]: "#f1c40f",
-                }
+                fig_donut.update_traces(textposition="inside", textinfo="percent+label")
+                st.plotly_chart(fig_donut, use_container_width=True)
 
-                fig_types = px.line(
-                    df_filtre_renamed,
-                    x="date",
-                    y=[t["tanker"], t["container"], t["dry_bulk"]],
-                    title=f"{secilen_bogaz} - {t['chart_types_title']} ({secilen_aralik})",
-                    labels={"date": t["date"], "value": t["daily_calls"], "variable": t["type"]},
-                    color_discrete_map=color_map,
-                )
-                fig_types.update_layout(hovermode="x unified")
-                st.plotly_chart(fig_types, use_container_width=True)
+            # TAB 2: Dünyadaki Tüm Boğazların Karşılaştırması
+            with tab_compare:
+                if "vessel_count_total" in df_pw.columns and name_col in df_pw.columns:
+                    df_sorted = df_pw[[name_col, "vessel_count_total"]].copy().dropna()
+                    df_sorted["vessel_count_total"] = pd.to_numeric(df_sorted["vessel_count_total"], errors="coerce")
+                    df_sorted = df_sorted.sort_values(by="vessel_count_total", ascending=True)
 
-            with t3:
-                st.dataframe(
-                    df_filtre[[
-                        "date",
-                        "n_total",
-                        "n_tanker",
-                        "n_container",
-                        "n_dry_bulk",
-                    ]].sort_values("date", ascending=False),
-                    use_container_width=True,
-                )
+                    fig_bar = px.bar(
+                        df_sorted,
+                        x="vessel_count_total",
+                        y=name_col,
+                        orientation="h",
+                        title=t["chart_compare_title"],
+                        labels={"vessel_count_total": t["total_transit"], name_col: t["strait"]},
+                        color="vessel_count_total",
+                        color_continuous_scale="Blues"
+                    )
+                    fig_bar.update_layout(height=700)
+                    st.plotly_chart(fig_bar, use_container_width=True)
+
+            # TAB 3: Taşınan Sektörler & Kritik Emtialar
+            with tab_industries:
+                st.subheader(f"⚓ {secilen_bogaz} - {t['tab_industries']}")
+                ind1 = row.get("industry_top1", "-")
+                ind2 = row.get("industry_top2", "-")
+                ind3 = row.get("industry_top3", "-")
+
+                col_i1, col_i2, col_i3 = st.columns(3)
+                col_i1.info(f"🥇 **1. Sektör / Commodity:**\n\n### {ind1}")
+                col_i2.info(f"🥈 **2. Sektör / Commodity:**\n\n### {ind2}")
+                col_i3.info(f"🥉 **3. Sektör / Commodity:**\n\n### {ind3}")
+
+            # TAB 4: Ham Veri
+            with tab_raw:
+                st.dataframe(df_pw, use_container_width=True)
     else:
-        st.warning(f"{secilen_bogaz} {t['no_data']}")
+        st.warning("PortWatch veri tabanı bulunamadı. Lütfen CSV dosyasının repo dizininde olduğundan emin olun.")
