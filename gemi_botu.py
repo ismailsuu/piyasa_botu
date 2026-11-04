@@ -33,11 +33,9 @@ def main():
     df = pd.read_csv(csv_file)
     print(f"Dosya başarıyla yüklendi. Toplam boğaz sayısı: {len(df)}")
 
-    # Raporlanacak hedef boğazlar ve gerçek resmi portid kodları
+    # Yalnızca hedeflenen 3 ana boğaz
     noktalar = [
-        ("İstanbul Boğazı", "chokepoint3"),
         ("Süveyş Kanalı", "chokepoint1"),
-        ("Babülmendep Boğazı", "chokepoint4"),
         ("Hürmüz Boğazı", "chokepoint6"),
         ("Ümit Burnu", "chokepoint7"),
     ]
@@ -45,16 +43,16 @@ def main():
     mesajlar = ["🚢 <b>IMF PortWatch Kritik Boğazlar Trafik Raporu</b>\n"]
     bulunan = 0
 
+    def safe_int(val):
+        try:
+            return int(float(val))
+        except (ValueError, TypeError):
+            return 0
+
     for etiket, pid in noktalar:
         satir = df[df["portid"] == pid]
         if not satir.empty:
             kayit = satir.iloc[0]
-
-            def safe_int(val):
-                try:
-                    return int(float(val))
-                except (ValueError, TypeError):
-                    return 0
 
             toplam = safe_int(kayit.get("vessel_count_total", 0))
             tanker = safe_int(kayit.get("vessel_count_tanker", 0))
