@@ -23,41 +23,52 @@ def send_telegram(mesaj):
     except Exception as e:
         print("Telegram gönderim hatası:", e)
 
-def main():
-    # Gerçek tarayıcı başlıkları (WAF engellerini önlemek için)
+def fetch_portwatch_data():
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
         "Accept": "application/json",
         "Referer": "https://portwatch.imf.org/",
     }
 
-    # PortWatch ArcGIS FeatureServer doğrudan JSON sorgusu
-    api_url = "https://services9.arcgis.com/weJ1QsnbMYJlCHdG/arcgis/rest/services/PortWatch_Chokepoints_Daily/FeatureServer/0/query"
+    # PortWatch'ın doğrulanmış ArcGIS FeatureServer sorgu uç noktası
+    query_url = "https://services9.arcgis.com/weJ1QsnbMYJlCHdG/arcgis/rest/services/PortWatch_daily_chokepoints_data/FeatureServer/0/query"
+    
     params = {
         "where": "1=1",
         "outFields": "*",
-        "orderByFields": "date DESC",
+        "returnGeometry": "false",
         "resultRecordCount": "2000",
+        "orderByFields": "date DESC",
         "f": "json"
     }
 
-    df = pd.DataFrame()
+    print("PortWatch verisi çekiliyor...")
     try:
-        print("ArcGIS FeatureServer üzerinden veri çekiliyor...")
-        r = requests.get(api_url, headers=headers, params=params, timeout=30)
-        
+        r = requests.get(query_url, headers=headers, params=params, timeout=30)
         if r.status_code == 200:
             data = r.json()
+            # Eğer orderByFields desteklenmezse parametresiz dene
+            if "error" in data:
+                print("Sıralama parametresi olmadan tekrar deneniyor...")
+                params.pop("orderByFields", None)
+                r = requests.get(query_url, headers=headers, params=params, timeout=30)
+                data = r.json()
+
             if "features" in data and len(data["features"]) > 0:
                 rows = [item["attributes"] for item in data["features"]]
-                df = pd.DataFrame(rows)
-                print(f"Veri başarıyla indirildi. Toplam kayıt: {len(df)}")
+                print(f"Veri başarıyla indirildi. Toplam satır: {len(rows)}")
+                return pd.DataFrame(rows)
             else:
-                print("API yanıt verdi fakat kayıt bulunamadı:", data.get("error", "Boş liste"))
+                print("API yanıt verdi fakat kayıt bulunamadı:", data.get("error", data))
         else:
             print(f"API Hatası: HTTP {r.status_code}")
     except Exception as e:
         print(f"Bağlantı hatası: {e}")
+
+    return pd.DataFrame()
+
+def main():
+    df = fetch_portwatch_data()
 
     if df.empty:
         print("Kritik Hata: PortWatch veri kaynağından kayıt alınamadı.")
@@ -66,14 +77,18 @@ def main():
     # Sütun isimlerini normalize et
     df.columns = [str(col).lower().strip() for col in df.columns]
 
-    # Unix timestamp (milisaniye) formatını tarihe çevir
-    if "date" in df.columns:
+    # Milisaniye (Unix Epoch) tarihini datetime formatına dönüştür
+    date_col = next((c for c in ["date", "datetime", "record_date"] if c in df.columns), None)
+    if date_col:
         try:
-            df["date"] = pd.to_datetime(df["date"], unit="ms")
+            df["parsed_date"] = pd.to_datetime(df[date_col], unit="ms")
         except Exception:
-            df["date"] = pd.to_datetime(df["date"], errors="coerce")
-        df = df.dropna(subset=["date"]).sort_values(by="date", ascending=False)
+            df["parsed_date"] = pd.to_datetime(df[date_col], errors="coerce")
+        df = df.dropna(subset=["parsed_date"]).sort_values(by="parsed_date", ascending=False)
+    else:
+        df["parsed_date"] = None
 
+    # app.py ile birebir eşleşen boğaz listesi ve anahtar kelimeleri
     noktalar = [
         ("Süveyş Kanalı", ["suez", "chokepoint1"]),
         ("Babülmendep Boğazı", ["bab_el_mandeb", "bab el-mandeb", "chokepoint2"]),
@@ -121,8 +136,8 @@ def main():
             kuru = safe_int(kayit.get("n_dry_bulk") or kayit.get("dry_bulk_calls") or kayit.get("cargo_calls") or 0)
 
             tarih_str = ""
-            if "date" in kayit and pd.notna(kayit["date"]):
-                tarih_str = f" <i>({str(kayit['date'])[:10]})</i>"
+            if pd.notna(kayit.get("parsed_date")):
+                tarih_str = f" <i>({str(kayit['parsed_date'])[:10]})</i>"
 
             mesajlar.append(f"⚓ <b>{etiket}</b>{tarih_str} (Toplam: <b>{toplam}</b>)")
             mesajlar.append(
