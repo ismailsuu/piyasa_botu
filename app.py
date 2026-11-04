@@ -42,18 +42,13 @@ LANG = {
         "candle_title": "Mum Grafiği",
         "no_data": "için veri bulunamadı.",
         "marine_title": "🚢 Kritik Boğazlar Deniz Trafiği Analizi",
-        "marine_sub": "Veriler IMF PortWatch resmi veri tabanından derlenmektedir.",
+        "marine_sub": "Veriler IMF PortWatch veri tabanından derlenmektedir.",
         "marine_settings": "⚓ Deniz Trafiği Ayarları",
         "strait": "Boğaz / Geçit",
         "chokepoints": {
-            "İstanbul Boğazı": ["chokepoint3", "bosporus"],
             "Süveyş Kanalı": ["chokepoint1", "suez"],
-            "Babülmendep Boğazı": ["chokepoint4", "mandeb"],
             "Hürmüz Boğazı": ["chokepoint6", "hormuz"],
             "Ümit Burnu": ["chokepoint7", "good hope", "cape"],
-            "Malakka Boğazı": ["chokepoint5", "malacca"],
-            "Panama Kanalı": ["chokepoint2", "panama"],
-            "Cebelitarık Boğazı": ["chokepoint8", "gibraltar"],
         },
         "spinner_text": "Veriler yükleniyor...",
         "total_transit": "Toplam Gemi Geçişi",
@@ -62,12 +57,12 @@ LANG = {
         "dry_bulk": "Kuru Yük",
         "general_cargo": "Genel Kargo",
         "roro": "Ro-Ro",
-        "tab_types": "📊 Gemi Türleri Dağılımı",
-        "tab_compare": "🌍 Küresel Boğazlar Sıralaması",
+        "tab_line_breakdown": "📈 Gemi Türleri Dağılımı (Çizgi Grafik)",
+        "tab_compare_line": "📊 3 Boğaz Karşılaştırma Grafiği",
         "tab_industries": "📦 Taşınan Kritik Sektörler",
         "tab_raw": "📋 Veri Tablosu",
-        "chart_types_title": "Gemi Türü Dağılımı (Oransal)",
-        "chart_compare_title": "Dünya Çapında 28 Kritik Boğazın Trafik Karşılaştırması",
+        "chart_line_title": "Gemi Türlerine Göre Geçiş Sayıları",
+        "chart_compare_title": "Süveyş, Hürmüz ve Ümit Burnu Karşılaştırmalı Geçiş Trendi",
         "date": "Tarih",
         "type": "Gemi Türü",
         "count": "Geçiş Sayısı",
@@ -99,14 +94,9 @@ LANG = {
         "marine_settings": "⚓ Maritime Settings",
         "strait": "Chokepoint / Strait",
         "chokepoints": {
-            "Bosporus Strait": ["chokepoint3", "bosporus"],
             "Suez Canal": ["chokepoint1", "suez"],
-            "Bab el-Mandeb Strait": ["chokepoint4", "mandeb"],
             "Strait of Hormuz": ["chokepoint6", "hormuz"],
             "Cape of Good Hope": ["chokepoint7", "good hope", "cape"],
-            "Malacca Strait": ["chokepoint5", "malacca"],
-            "Panama Canal": ["chokepoint2", "panama"],
-            "Gibraltar Strait": ["chokepoint8", "gibraltar"],
         },
         "spinner_text": "Loading data...",
         "total_transit": "Total Vessel Transits",
@@ -115,12 +105,12 @@ LANG = {
         "dry_bulk": "Dry Bulk",
         "general_cargo": "General Cargo",
         "roro": "Ro-Ro",
-        "tab_types": "📊 Transit Breakdown by Type",
-        "tab_compare": "🌍 Global Chokepoints Ranking",
+        "tab_line_breakdown": "📈 Vessel Types Breakdown (Line Chart)",
+        "tab_compare_line": "📊 3 Chokepoints Comparison (Line Chart)",
         "tab_industries": "📦 Top Traded Commodities",
         "tab_raw": "📋 Raw Data",
-        "chart_types_title": "Transit Share by Vessel Type",
-        "chart_compare_title": "Global Comparison of 28 Maritime Chokepoints",
+        "chart_line_title": "Transit Calls by Vessel Category",
+        "chart_compare_title": "Suez, Hormuz & Cape of Good Hope Comparison",
         "date": "Date",
         "type": "Vessel Type",
         "count": "Transit Count",
@@ -282,29 +272,12 @@ else:
         csv_file = "PortWatch_chokepoints_database.csv"
         if os.path.exists(csv_file):
             return pd.read_csv(csv_file)
-        
-        # Yerel dosya bulunamazsa internet kaynaklarını dene
-        fallback_urls = [
-            "https://hub.arcgis.com/api/v3/datasets/3da2b9ca97684916b75c4013f95d18ab_0/downloads/data?format=csv",
-            "https://portwatch.imf.org/api/v3/datasets/3da2b9ca97684916b75c4013f95d18ab_0/downloads/data?format=csv"
-        ]
-        headers = {"User-Agent": "Mozilla/5.0"}
-        for url in fallback_urls:
-            try:
-                r = requests.get(url, headers=headers, timeout=20)
-                if r.status_code == 200:
-                    df = pd.read_csv(io.StringIO(r.text))
-                    if not df.empty:
-                        return df
-            except Exception:
-                continue
         return pd.DataFrame()
 
     with st.spinner(t["spinner_text"]):
         df_pw = load_portwatch_data()
 
     if not df_pw.empty:
-        # Sütun isimlerini normalize et
         df_pw.columns = [str(c).strip() for c in df_pw.columns]
 
         id_col = "portid" if "portid" in df_pw.columns else "portname"
@@ -327,13 +300,12 @@ else:
                 except Exception:
                     return 0
 
-            # Gemi sayılarını al
-            toplam = to_int(row.get("vessel_count_total", row.get("n_total", 0)))
-            tanker = to_int(row.get("vessel_count_tanker", row.get("n_tanker", 0)))
-            konteyner = to_int(row.get("vessel_count_container", row.get("n_container", 0)))
-            kuru_yuk = to_int(row.get("vessel_count_dry_bulk", row.get("n_dry_bulk", 0)))
-            genel_kargo = to_int(row.get("vessel_count_general_cargo", row.get("n_general_cargo", 0)))
-            roro = to_int(row.get("vessel_count_RoRo", row.get("n_roro", 0)))
+            toplam = to_int(row.get("vessel_count_total", 0))
+            tanker = to_int(row.get("vessel_count_tanker", 0))
+            konteyner = to_int(row.get("vessel_count_container", 0))
+            kuru_yuk = to_int(row.get("vessel_count_dry_bulk", 0))
+            genel_kargo = to_int(row.get("vessel_count_general_cargo", 0))
+            roro = to_int(row.get("vessel_count_RoRo", 0))
 
             # Üst Metrik Kartları
             m1, m2, m3, m4 = st.columns(4)
@@ -342,55 +314,80 @@ else:
             m3.metric(t["container"], f"{konteyner:,}")
             m4.metric(t["dry_bulk"], f"{kuru_yuk:,}")
 
-            tab_types, tab_compare, tab_industries, tab_raw = st.tabs([
-                t["tab_types"], t["tab_compare"], t["tab_industries"], t["tab_raw"]
+            tab_line_breakdown, tab_compare_line, tab_industries, tab_raw = st.tabs([
+                t["tab_line_breakdown"], t["tab_compare_line"], t["tab_industries"], t["tab_raw"]
             ])
 
-            # TAB 1: Gemi Türleri Dağılımı (Donut Grafiği)
-            with tab_types:
-                breakdown_data = pd.DataFrame({
+            # TAB 1: Seçilen Boğazın Gemi Türleri Dağılımı (Klasik Çizgi Grafik)
+            with tab_line_breakdown:
+                category_data = pd.DataFrame({
                     t["type"]: [t["tanker"], t["container"], t["dry_bulk"], t["general_cargo"], t["roro"]],
                     t["count"]: [tanker, konteyner, kuru_yuk, genel_kargo, roro]
                 })
-                breakdown_data = breakdown_data[breakdown_data[t["count"]] > 0]
 
-                fig_donut = px.pie(
-                    breakdown_data,
-                    names=t["type"],
-                    values=t["count"],
-                    hole=0.45,
-                    title=f"{secilen_bogaz} - {t['chart_types_title']}",
-                    color=t["type"],
+                fig_line = px.line(
+                    category_data,
+                    x=t["type"],
+                    y=t["count"],
+                    markers=True,
+                    text=t["count"],
+                    title=f"{secilen_bogaz} - {t['chart_line_title']}",
+                )
+                fig_line.update_traces(
+                    line=dict(color="#1f77b4", width=3),
+                    marker=dict(size=10, color="#d62728"),
+                    textposition="top center"
+                )
+                fig_line.update_layout(
+                    hovermode="x unified",
+                    xaxis_title=t["type"],
+                    yaxis_title=t["count"]
+                )
+                st.plotly_chart(fig_line, use_container_width=True)
+
+            # TAB 2: Süveyş, Hürmüz ve Ümit Burnu Karşılaştırmalı Çizgi Grafiği
+            with tab_compare_line:
+                target_3_pids = ["chokepoint1", "chokepoint6", "chokepoint7"]
+                df_3 = df_pw[df_pw[id_col].isin(target_3_pids)].copy()
+
+                name_mapping = {
+                    "chokepoint1": "Süveyş Kanalı (Suez)",
+                    "chokepoint6": "Hürmüz Boğazı (Hormuz)",
+                    "chokepoint7": "Ümit Burnu (Good Hope)"
+                }
+                df_3["Bogaz"] = df_3[id_col].map(name_mapping)
+
+                compare_rows = []
+                for _, r_3 in df_3.iterrows():
+                    b_name = r_3["Bogaz"]
+                    compare_rows.append({"Boğaz": b_name, t["type"]: t["tanker"], t["count"]: to_int(r_3.get("vessel_count_tanker", 0))})
+                    compare_rows.append({"Boğaz": b_name, t["type"]: t["container"], t["count"]: to_int(r_3.get("vessel_count_container", 0))})
+                    compare_rows.append({"Boğaz": b_name, t["type"]: t["dry_bulk"], t["count"]: to_int(r_3.get("vessel_count_dry_bulk", 0))})
+                    compare_rows.append({"Boğaz": b_name, t["type"]: t["general_cargo"], t["count"]: to_int(r_3.get("vessel_count_general_cargo", 0))})
+                    compare_rows.append({"Boğaz": b_name, t["type"]: t["roro"], t["count"]: to_int(r_3.get("vessel_count_RoRo", 0))})
+
+                df_compare_plot = pd.DataFrame(compare_rows)
+
+                fig_multi_line = px.line(
+                    df_compare_plot,
+                    x=t["type"],
+                    y=t["count"],
+                    color="Boğaz",
+                    markers=True,
+                    title=t["chart_compare_title"],
                     color_discrete_map={
-                        t["tanker"]: "#e74c3c",
-                        t["container"]: "#3498db",
-                        t["dry_bulk"]: "#f1c40f",
-                        t["general_cargo"]: "#9b59b6",
-                        t["roro"]: "#1abc9c",
+                        "Süveyş Kanalı (Suez)": "#2ca02c",
+                        "Hürmüz Boğazı (Hormuz)": "#d62728",
+                        "Ümit Burnu (Good Hope)": "#1f77b4"
                     }
                 )
-                fig_donut.update_traces(textposition="inside", textinfo="percent+label")
-                st.plotly_chart(fig_donut, use_container_width=True)
-
-            # TAB 2: Dünyadaki Tüm Boğazların Karşılaştırması
-            with tab_compare:
-                if "vessel_count_total" in df_pw.columns and name_col in df_pw.columns:
-                    df_sorted = df_pw[[name_col, "vessel_count_total"]].copy().dropna()
-                    df_sorted["vessel_count_total"] = pd.to_numeric(df_sorted["vessel_count_total"], errors="coerce")
-                    df_sorted = df_sorted.sort_values(by="vessel_count_total", ascending=True)
-
-                    fig_bar = px.bar(
-                        df_sorted,
-                        x="vessel_count_total",
-                        y=name_col,
-                        orientation="h",
-                        title=t["chart_compare_title"],
-                        labels={"vessel_count_total": t["total_transit"], name_col: t["strait"]},
-                        color="vessel_count_total",
-                        color_continuous_scale="Blues"
-                    )
-                    fig_bar.update_layout(height=700)
-                    st.plotly_chart(fig_bar, use_container_width=True)
+                fig_multi_line.update_traces(line=dict(width=3), marker=dict(size=9))
+                fig_multi_line.update_layout(
+                    hovermode="x unified",
+                    xaxis_title=t["type"],
+                    yaxis_title=t["count"]
+                )
+                st.plotly_chart(fig_multi_line, use_container_width=True)
 
             # TAB 3: Taşınan Sektörler & Kritik Emtialar
             with tab_industries:
@@ -404,8 +401,9 @@ else:
                 col_i2.info(f"🥈 **2. Sektör / Commodity:**\n\n### {ind2}")
                 col_i3.info(f"🥉 **3. Sektör / Commodity:**\n\n### {ind3}")
 
-            # TAB 4: Ham Veri
+            # TAB 4: Ham Veri (Yalnızca 3 Boğaz)
             with tab_raw:
-                st.dataframe(df_pw, use_container_width=True)
+                df_filtered_3 = df_pw[df_pw[id_col].isin(["chokepoint1", "chokepoint6", "chokepoint7"])]
+                st.dataframe(df_filtered_3, use_container_width=True)
     else:
         st.warning("PortWatch veri tabanı bulunamadı. Lütfen CSV dosyasının repo dizininde olduğundan emin olun.")
