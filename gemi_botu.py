@@ -23,25 +23,26 @@ def send_telegram(mesaj):
     except Exception as e:
         print("Telegram gönderim hatası:", e)
 
-def fetch_single_point(query_url, headers, where_clause):
-    """Belirtilen filtre için en güncel tekil kaydı POST ile çeker."""
-    data_payload = {
-        "where": where_clause,
-        "outFields": "*",
-        "orderByFields": "date DESC",
-        "resultRecordCount": "1",
-        "returnGeometry": "false",
-        "f": "json"
-    }
-    try:
-        r = requests.post(query_url, headers=headers, data=data_payload, timeout=20)
-        if r.status_code == 200:
-            res_json = r.json()
-            features = res_json.get("features", [])
-            if features:
-                return features[0].get("attributes")
-    except Exception as e:
-        print(f"Sorgu hatası ({where_clause}): {e}")
+def fetch_single_chokepoint(query_url, headers, pid_list):
+    """Verilen portid listesindeki ilk geçerli güncel kaydı POST ile çeker."""
+    for pid in pid_list:
+        data_payload = {
+            "where": f"portid = '{pid}'",
+            "outFields": "*",
+            "orderByFields": "date DESC",
+            "resultRecordCount": "1",
+            "returnGeometry": "false",
+            "f": "json"
+        }
+        try:
+            r = requests.post(query_url, headers=headers, data=data_payload, timeout=20)
+            if r.status_code == 200:
+                res_json = r.json()
+                features = res_json.get("features", [])
+                if features:
+                    return features[0].get("attributes")
+        except Exception as e:
+            print(f"Hata ({pid}): {e}")
     return None
 
 def fetch_portwatch_data():
@@ -52,19 +53,19 @@ def fetch_portwatch_data():
 
     query_url = "https://services9.arcgis.com/weJ1QsnbMYJlCHdG/arcgis/rest/services/Daily_Chokepoints_Data/FeatureServer/0/query"
 
-    # Her boğaz için olası tüm portid ve isim kombinasyonları
+    # Resmi IMF PortWatch portid kodları
     hedef_noktalar = [
-        ("Süveyş Kanalı", "(portid = 'chokepoint1' OR LOWER(name) LIKE '%suez%')"),
-        ("Babülmendep Boğazı", "(portid = 'chokepoint2' OR LOWER(name) LIKE '%mandeb%')"),
-        ("Hürmüz Boğazı", "(portid IN ('chokepoint3', 'chokepoint6') OR LOWER(name) LIKE '%hormuz%')"),
-        ("Ümit Burnu", "(portid IN ('chokepoint5', 'chokepoint8') OR LOWER(name) LIKE '%good hope%' OR LOWER(name) LIKE '%cape%')"),
+        ("Süveyş Kanalı", ["chokepoint1"]),
+        ("Babülmendep Boğazı", ["chokepoint2"]),
+        ("Hürmüz Boğazı", ["chokepoint3", "chokepoint6"]),
+        ("Ümit Burnu", ["chokepoint5", "chokepoint8"]),
     ]
 
     records = []
-    print("Boğaz verileri tek tek hedeflenerek çekiliyor...")
-    
-    for etiket, where_filter in hedef_noktalar:
-        attr = fetch_single_point(query_url, headers, where_filter)
+    print("Boğaz verileri resmi portid kodlarıyla sorgulanıyor...")
+
+    for etiket, pids in hedef_noktalar:
+        attr = fetch_single_chokepoint(query_url, headers, pids)
         if attr:
             attr["_label"] = etiket
             records.append(attr)
@@ -84,7 +85,7 @@ def main():
         print("Kritik Hata: Hiçbir boğaz için veri alınamadı.")
         return
 
-    # Sütun isimlerini küçük harfe normalize et
+    # Sütun isimlerini normalize et
     df.columns = [str(col).lower().strip() for col in df.columns]
 
     # Tarih formatını ayarla
