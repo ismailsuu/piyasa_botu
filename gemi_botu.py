@@ -1,6 +1,6 @@
 import os
-import requests
 import pandas as pd
+import requests
 
 BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
@@ -23,111 +23,58 @@ def send_telegram(mesaj):
     except Exception as e:
         print("Telegram gönderim hatası:", e)
 
-def fetch_single_chokepoint(query_url, headers, pid_list):
-    """Verilen portid listesindeki ilk geçerli güncel kaydı POST ile çeker."""
-    for pid in pid_list:
-        data_payload = {
-            "where": f"portid = '{pid}'",
-            "outFields": "*",
-            "orderByFields": "date DESC",
-            "resultRecordCount": "1",
-            "returnGeometry": "false",
-            "f": "json"
-        }
-        try:
-            r = requests.post(query_url, headers=headers, data=data_payload, timeout=20)
-            if r.status_code == 200:
-                res_json = r.json()
-                features = res_json.get("features", [])
-                if features:
-                    return features[0].get("attributes")
-        except Exception as e:
-            print(f"Hata ({pid}): {e}")
-    return None
-
-def fetch_portwatch_data():
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        "Referer": "https://portwatch.imf.org/",
-    }
-
-    query_url = "https://services9.arcgis.com/weJ1QsnbMYJlCHdG/arcgis/rest/services/Daily_Chokepoints_Data/FeatureServer/0/query"
-
-    # Resmi IMF PortWatch portid kodları
-    hedef_noktalar = [
-        ("Süveyş Kanalı", ["chokepoint1"]),
-        ("Babülmendep Boğazı", ["chokepoint2"]),
-        ("Hürmüz Boğazı", ["chokepoint3", "chokepoint6"]),
-        ("Ümit Burnu", ["chokepoint5", "chokepoint8"]),
-    ]
-
-    records = []
-    print("Boğaz verileri resmi portid kodlarıyla sorgulanıyor...")
-
-    for etiket, pids in hedef_noktalar:
-        attr = fetch_single_chokepoint(query_url, headers, pids)
-        if attr:
-            attr["_label"] = etiket
-            records.append(attr)
-            print(f"Alındı: {etiket}")
-        else:
-            print(f"Kayıt bulunamadı: {etiket}")
-
-    if records:
-        return pd.DataFrame(records)
-
-    return pd.DataFrame()
-
 def main():
-    df = fetch_portwatch_data()
+    csv_file = "PortWatch_chokepoints_database.csv"
 
-    if df.empty:
-        print("Kritik Hata: Hiçbir boğaz için veri alınamadı.")
+    if not os.path.exists(csv_file):
+        print(f"Kritik Hata: {csv_file} dosyası dizinde bulunamadı!")
         return
 
-    # Sütun isimlerini normalize et
-    df.columns = [str(col).lower().strip() for col in df.columns]
+    df = pd.read_csv(csv_file)
+    print(f"Dosya başarıyla yüklendi. Toplam boğaz sayısı: {len(df)}")
 
-    # Tarih formatını ayarla
-    date_col = next((c for c in ["date", "datetime", "record_date"] if c in df.columns), None)
-    if date_col:
-        try:
-            df["parsed_date"] = pd.to_datetime(df[date_col], unit="ms")
-        except Exception:
-            df["parsed_date"] = pd.to_datetime(df[date_col], errors="coerce")
-    else:
-        df["parsed_date"] = None
+    # Raporlanacak hedef boğazlar ve gerçek resmi portid kodları
+    noktalar = [
+        ("İstanbul Boğazı", "chokepoint3"),
+        ("Süveyş Kanalı", "chokepoint1"),
+        ("Babülmendep Boğazı", "chokepoint4"),
+        ("Hürmüz Boğazı", "chokepoint6"),
+        ("Ümit Burnu", "chokepoint7"),
+    ]
 
-    mesajlar = ["🚢 <b>IMF PortWatch Deniz Trafiği Raporu</b>\n"]
+    mesajlar = ["🚢 <b>IMF PortWatch Kritik Boğazlar Trafik Raporu</b>\n"]
     bulunan = 0
 
-    def safe_int(val):
-        try:
-            return int(float(val))
-        except (ValueError, TypeError):
-            return 0
+    for etiket, pid in noktalar:
+        satir = df[df["portid"] == pid]
+        if not satir.empty:
+            kayit = satir.iloc[0]
 
-    for _, satir in df.iterrows():
-        etiket = satir.get("_label", "Boğaz")
-        toplam = safe_int(satir.get("n_total") or satir.get("total_calls") or satir.get("transit_calls") or 0)
-        tanker = safe_int(satir.get("n_tanker") or satir.get("tanker_calls") or satir.get("tankers") or 0)
-        konteyner = safe_int(satir.get("n_container") or satir.get("container_calls") or satir.get("containers") or 0)
-        kuru = safe_int(satir.get("n_dry_bulk") or satir.get("dry_bulk_calls") or satir.get("cargo_calls") or 0)
+            def safe_int(val):
+                try:
+                    return int(float(val))
+                except (ValueError, TypeError):
+                    return 0
 
-        tarih_str = ""
-        if pd.notna(satir.get("parsed_date")):
-            tarih_str = f" <i>({str(satir['parsed_date'])[:10]})</i>"
+            toplam = safe_int(kayit.get("vessel_count_total", 0))
+            tanker = safe_int(kayit.get("vessel_count_tanker", 0))
+            konteyner = safe_int(kayit.get("vessel_count_container", 0))
+            kuru = safe_int(kayit.get("vessel_count_dry_bulk", 0))
 
-        mesajlar.append(f"⚓ <b>{etiket}</b>{tarih_str} (Toplam: <b>{toplam}</b>)")
-        mesajlar.append(f"   ▫️ Tanker: {tanker} | Konteyner: {konteyner} | Kuru Yük: {kuru}\n")
-        bulunan += 1
+            mesajlar.append(f"⚓ <b>{etiket}</b> (Toplam Geçiş: <b>{toplam:,}</b>)")
+            mesajlar.append(
+                f"   ▫️ Tanker: {tanker:,} | Konteyner: {konteyner:,} | Kuru Yük: {kuru:,}\n"
+            )
+            bulunan += 1
+        else:
+            print(f"{etiket} ({pid}) bulunamadı.")
 
     if bulunan > 0:
         mesajlar.append("📊 <b>Canlı Panel:</b> https://ismail-piyasa.streamlit.app/")
         send_telegram("\n".join(mesajlar))
         print(f"İşlem Tamamlandı: {bulunan} boğaz Telegram'a iletildi.")
     else:
-        print("Uyarı: Boğaz verisi listelenemedi.")
+        print("Uyarı: Hiçbir boğaz listelenemedi.")
 
 if __name__ == "__main__":
     main()
