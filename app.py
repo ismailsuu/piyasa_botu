@@ -58,7 +58,7 @@ LANG = {
         "tab_raw": "📋 Veri Tablosu",
         "transit_trend": "Geçiş Trendi",
         "date": "Tarih",
-        "count": "Geçiş Sayısı",
+        "count": "Gemi Sayısı",
     },
     "EN": {
         "menu_title": "🧭 Navigation",
@@ -99,7 +99,7 @@ LANG = {
         "tab_raw": "📋 Data Table",
         "transit_trend": "Transit Trend",
         "date": "Date",
-        "count": "Transit Count",
+        "count": "Vessel Count",
     },
 }
 
@@ -195,6 +195,12 @@ if app_mode == t["market_mode"]:
         tab_line, tab_candle, tab_table = st.tabs([t["tab_line"], t["tab_candle"], t["tab_table"]])
 
         with tab_line:
+            # Finans tarafında yıl bazlı etiketler
+            y_start = df_market.index.min().year
+            y_end = df_market.index.max().year
+            f_tickvals = [f"{yr}-01-01" for yr in range(y_start, y_end + 2)]
+            f_ticktext = [str(yr) for yr in range(y_start, y_end + 2)]
+
             fig_line = go.Figure()
             fig_line.add_trace(
                 go.Scatter(
@@ -215,9 +221,9 @@ if app_mode == t["market_mode"]:
                     title=dict(text=t["date"], font=dict(color="#64748b", size=12)),
                     showgrid=False,
                     showline=False,
-                    type="date",
-                    dtick="M12",          # Yıllık işaretler
-                    tickformat="%Y",      # Sadece yıl (2018, 2019...)
+                    tickmode="array",
+                    tickvals=f_tickvals,
+                    ticktext=f_ticktext,
                     tickfont=dict(color="#64748b", size=11),
                 ),
                 yaxis=dict(
@@ -226,7 +232,7 @@ if app_mode == t["market_mode"]:
                     gridcolor="#e2e8f0",
                     gridwidth=1,
                     showline=False,
-                    tickformat="~s",      # Finans tarafında 20k, 40k
+                    tickformat="~s",
                     tickfont=dict(color="#64748b", size=11),
                 ),
                 margin=dict(l=40, r=20, t=50, b=40),
@@ -289,13 +295,16 @@ else:
         if df_strait.empty:
             st.warning(f"{secilen_bogaz} {t['no_data']}")
         else:
-            date_col = next((c for c in df_strait.columns if c in ["date", "tarih", "datetime", "time"]), None)
+            # Tarih sütununu akıllı tespit et
+            possible_date_cols = [c for c in df_strait.columns if any(k in c.lower() for k in ["date", "tarih", "time", "year", "gun"])]
             
-            if date_col:
-                df_strait[date_col] = pd.to_datetime(df_strait[date_col])
-                df_strait = df_strait.sort_values(by=date_col).set_index(date_col)
+            if possible_date_cols:
+                d_col = possible_date_cols[0]
+                df_strait["parsed_date"] = pd.to_datetime(df_strait[d_col], errors="coerce")
             else:
-                df_strait.index = pd.date_range(end=pd.Timestamp.now(), periods=len(df_strait), freq="D")
+                df_strait["parsed_date"] = pd.date_range(end=pd.Timestamp.now(), periods=len(df_strait), freq="D")
+
+            df_strait = df_strait.dropna(subset=["parsed_date"]).sort_values("parsed_date").set_index("parsed_date")
 
             # 10, 5, 3 yıl filtreleme
             year_offsets = {"3y": 3, "5y": 5, "10y": 10}
@@ -307,16 +316,17 @@ else:
                 effective_start = max(earliest_date, target_start)
                 df_strait = df_strait.loc[df_strait.index >= effective_start]
 
+            # Geçiş sütunu
             target_metric_col = "vessel_count_total" if "vessel_count_total" in df_strait.columns else df_strait.select_dtypes(include="number").columns[0]
             df_strait[target_metric_col] = pd.to_numeric(df_strait[target_metric_col], errors="coerce").fillna(0)
 
-            # Periyoda göre toplama
-            if interval_choice == t["intervals"][1]:
-                df_plot = df_strait[[target_metric_col]].resample("W").sum()
-            elif interval_choice == t["intervals"][2]:
-                df_plot = df_strait[[target_metric_col]].resample("ME").sum()
-            else:
-                df_plot = df_strait[[target_metric_col]].resample("D").sum()
+            # 90000 gibi şişmeleri önlemek için ortalama (mean) bazlı örnekleme
+            if interval_choice == t["intervals"][1]:    # Haftalık ortalama
+                df_plot = df_strait[[target_metric_col]].resample("W").mean()
+            elif interval_choice == t["intervals"][2]:  # Aylık ortalama
+                df_plot = df_strait[[target_metric_col]].resample("ME").mean()
+            else:                                       # Günlük
+                df_plot = df_strait[[target_metric_col]].resample("D").mean()
 
             df_plot = df_plot.dropna()
 
@@ -327,17 +337,23 @@ else:
             p_low = df_plot[target_metric_col].min()
 
             m1, m2, m3, m4 = st.columns(4)
-            m1.metric(t["last_transit"], f"{int(last_val):,}", f"%{pct_change:.2f}")
-            m2.metric(t["period_high"], f"{int(p_high):,}")
-            m3.metric(t["period_low"], f"{int(p_low):,}")
+            m1.metric(t["last_transit"], f"{int(round(last_val)):,}", f"%{pct_change:.2f}")
+            m2.metric(t["period_high"], f"{int(round(p_high)):,}")
+            m3.metric(t["period_low"], f"{int(round(p_low)):,}")
             m4.metric(t["data_count"], f"{len(df_plot)}")
 
             tab_marine_trend, tab_marine_breakdown, tab_compare_line, tab_raw = st.tabs([
                 t["tab_marine_trend"], t["tab_marine_breakdown"], t["tab_compare_line"], t["tab_raw"]
             ])
 
-            # ÇİZGİ GRAFİK: Y ekseni düz tam sayı (20, 80...), X ekseni sadece Yıl (2018, 2019...)
+            # TAB 1: YILLAR ALTA SABİTLENMİŞ, SOLDA DÜZ GEMİ SAYISI OLAN GRAFİK
             with tab_marine_trend:
+                # X eksenindeki yılları zorunlu dizi olarak hazırla
+                start_yr = df_plot.index.min().year
+                end_yr = df_plot.index.max().year
+                year_tickvals = [f"{yr}-01-01" for yr in range(start_yr, end_yr + 2)]
+                year_ticktext = [str(yr) for yr in range(start_yr, end_yr + 2)]
+
                 fig_marine = go.Figure()
                 fig_marine.add_trace(
                     go.Scatter(
@@ -346,7 +362,7 @@ else:
                         mode="lines",
                         line=dict(color="#0052cc", width=2),
                         name=t["count"],
-                        hovertemplate="%{x|%Y-%m-%d}<br>Geçiş Sayısı: %{y:,.0f}<extra></extra>"
+                        hovertemplate="%{x|%Y-%m-%d}<br>Gemi Sayısı: %{y:.1f}<extra></extra>"
                     )
                 )
 
@@ -362,9 +378,10 @@ else:
                         title=dict(text=t["date"], font=dict(color="#64748b", size=12)),
                         showgrid=False,
                         showline=False,
-                        type="date",
-                        dtick="M12",          # Yıllık aralıklar
-                        tickformat="%Y",      # Sadece yıl gösterimi (2018, 2019...)
+                        zeroline=False,
+                        tickmode="array",             # Otomatik yerine zorunlu liste
+                        tickvals=year_tickvals,       # Her yılın 1 Ocak noktası
+                        ticktext=year_ticktext,       # 2018, 2019, 2020...
                         tickfont=dict(color="#64748b", size=11),
                     ),
                     yaxis=dict(
@@ -373,7 +390,8 @@ else:
                         gridcolor="#e2e8f0",
                         gridwidth=1,
                         showline=False,
-                        tickformat="d",       # 'k' yok, düz tam sayı (20, 80 vb.)
+                        zeroline=False,
+                        tickformat="d",               # Düz tam sayı (20, 40, 80...)
                         tickfont=dict(color="#64748b", size=11),
                     ),
                     margin=dict(l=40, r=20, t=50, b=40),
@@ -383,13 +401,13 @@ else:
             with tab_marine_breakdown:
                 sub_cols = [c for c in ["vessel_count_tanker", "vessel_count_container", "vessel_count_dry_bulk", "vessel_count_general_cargo", "vessel_count_roro"] if c in df_strait.columns]
                 if sub_cols:
-                    df_sub = df_strait[sub_cols].apply(pd.to_numeric, errors="coerce").resample("ME" if interval_choice == t["intervals"][2] else "W").sum()
+                    df_sub = df_strait[sub_cols].apply(pd.to_numeric, errors="coerce").resample("ME" if interval_choice == t["intervals"][2] else "W").mean()
                     fig_sub = px.line(df_sub, x=df_sub.index, y=sub_cols, title=f"{secilen_bogaz} - Gemi Türleri Dağılım Trendi")
                     fig_sub.update_layout(
                         plot_bgcolor="#FFFFFF", 
                         paper_bgcolor="#FFFFFF", 
                         hovermode="x unified",
-                        xaxis=dict(type="date", dtick="M12", tickformat="%Y"),
+                        xaxis=dict(tickmode="array", tickvals=year_tickvals, ticktext=year_ticktext),
                         yaxis=dict(tickformat="d")
                     )
                     st.plotly_chart(fig_sub, use_container_width=True)
@@ -400,15 +418,20 @@ else:
                 st.subheader(t["tab_compare_line"])
                 target_3_pids = ["chokepoint1", "chokepoint6", "chokepoint7"]
                 df_3 = df_pw[df_pw[id_col].isin(target_3_pids)].copy()
-                if not df_3.empty and date_col:
-                    df_3[date_col] = pd.to_datetime(df_3[date_col])
-                    df_3_pivot = df_3.pivot_table(index=date_col, columns=name_col, values=target_metric_col, aggfunc="sum").resample("W").sum()
+                
+                date_c_3 = next((c for c in df_3.columns if any(k in c.lower() for k in ["date", "tarih", "time", "year"])), None)
+                if not df_3.empty and date_c_3:
+                    df_3["dt"] = pd.to_datetime(df_3[date_c_3], errors="coerce")
+                    df_3 = df_3.dropna(subset=["dt"])
+                    df_3[target_metric_col] = pd.to_numeric(df_3[target_metric_col], errors="coerce").fillna(0)
+                    df_3_pivot = df_3.pivot_table(index="dt", columns=name_col, values=target_metric_col, aggfunc="mean").resample("W").mean()
+                    
                     fig_3 = px.line(df_3_pivot, x=df_3_pivot.index, y=df_3_pivot.columns, title="Süveyş, Hürmüz ve Ümit Burnu Geçiş Karşılaştırması")
                     fig_3.update_layout(
                         plot_bgcolor="#FFFFFF", 
                         paper_bgcolor="#FFFFFF", 
                         hovermode="x unified",
-                        xaxis=dict(type="date", dtick="M12", tickformat="%Y"),
+                        xaxis=dict(tickmode="array", tickvals=year_tickvals, ticktext=year_ticktext),
                         yaxis=dict(tickformat="d")
                     )
                     st.plotly_chart(fig_3, use_container_width=True)
