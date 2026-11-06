@@ -28,7 +28,7 @@ LANG = {
         "timeframe": "Zaman Dilimi",
         "data_period": "Veri Periyodu",
         "intervals": ["Günlük", "Haftalık", "Aylık"],
-        "periods": ["1 Ay", "6 Ay", "1 Yıl", "3 Yıl", "5 Yıl", "10 Yıl", "Tümü (Maks)"],
+        "periods": ["En Erken (Tümü)", "10 Yıl", "5 Yıl", "3 Yıl"],
         "market_title": "📈 Finansal Gösterge Paneli",
         "market_sub": "Veriler Yahoo Finance üzerinden canlı ve geçmişe dönük olarak çekilmektedir.",
         "last_close": "Son Kapanış Fiyatı",
@@ -76,7 +76,7 @@ LANG = {
         "timeframe": "Timeframe",
         "data_period": "Data Frequency",
         "intervals": ["Daily", "Weekly", "Monthly"],
-        "periods": ["1 Month", "6 Months", "1 Year", "3 Years", "5 Years", "10 Years", "All (Max)"],
+        "periods": ["All (Earliest)", "10 Years", "5 Years", "3 Years"],
         "market_title": "📈 Financial Dashboard",
         "market_sub": "Live and historical market data powered by Yahoo Finance.",
         "last_close": "Last Close Price",
@@ -154,13 +154,14 @@ if app_mode == t["market_mode"]:
     selected_label = st.sidebar.selectbox(t["instrument"], list(TICKERS.keys()))
     selected_ticker = TICKERS[selected_label]
 
-    raw_period_values = ["1mo", "6mo", "1y", "3y", "5y", "10y", "max"]
+    # Sadeleştirilmiş zaman dilimi eşlemesi
+    raw_period_values = ["max", "10y", "5y", "3y"]
     period_display_map = dict(zip(t["periods"], raw_period_values))
 
     selected_period_label = st.sidebar.selectbox(
-        t["timeframe"], t["periods"], index=5
+        t["timeframe"], t["periods"], index=0
     )
-    selected_period = period_display_map[selected_period_label]
+    selected_period_key = period_display_map[selected_period_label]
 
     interval_display_map = dict(zip(t["intervals"], ["1d", "1wk", "1mo"]))
     interval_choice = st.sidebar.radio(
@@ -168,10 +169,11 @@ if app_mode == t["market_mode"]:
     )
 
     @st.cache_data(ttl=1800)
-    def load_market_data(ticker_symbol, period, interval):
+    def load_market_data(ticker_symbol, interval):
         try:
             ticker = yf.Ticker(ticker_symbol)
-            df = ticker.history(period=period, interval=interval)
+            # En erken veriyi baz almak ve filtrelemeyi güvenli yapmak için tüm geçmişi çekiyoruz
+            df = ticker.history(period="max", interval=interval)
             if not df.empty:
                 df.index = pd.to_datetime(df.index)
             return df
@@ -181,11 +183,23 @@ if app_mode == t["market_mode"]:
     st.title(t["market_title"])
     st.caption(t["market_sub"])
 
-    df_market = load_market_data(
-        selected_ticker, selected_period, interval_display_map[interval_choice]
-    )
+    df_full = load_market_data(selected_ticker, interval_display_map[interval_choice])
 
-    if not df_market.empty:
+    if not df_full.empty:
+        # Zaman Dilimi Filtreleme: Varlık istenen yıldan daha gençse eldeki en erken tarihten başlar
+        df_market = df_full.copy()
+        year_offsets = {"3y": 3, "5y": 5, "10y": 10}
+
+        if selected_period_key in year_offsets:
+            years = year_offsets[selected_period_key]
+            latest_date = df_market.index[-1]
+            earliest_date = df_market.index[0]
+            target_start = latest_date - pd.DateOffset(years=years)
+            
+            # Başlangıç tarihi veri tabanındaki en eski tarihten eskiyse çökmez, en eski tarihi baz alır
+            effective_start = max(earliest_date, target_start)
+            df_market = df_market.loc[df_market.index >= effective_start]
+
         last_price = df_market["Close"].iloc[-1]
         period_high = df_market["High"].max()
         period_low = df_market["Low"].min()
@@ -213,14 +227,45 @@ if app_mode == t["market_mode"]:
         )
 
         with tab_line:
-            fig_line = px.line(
-                df_market,
-                x=df_market.index,
-                y="Close",
-                title=f"{selected_label} - {t['price_trend']}",
+            # Görseldeki birebir sade ve modern tasarım:
+            fig_line = go.Figure()
+            fig_line.add_trace(
+                go.Scatter(
+                    x=df_market.index,
+                    y=df_market["Close"],
+                    mode="lines",
+                    line=dict(color="#0052cc", width=2),
+                    name="Price",
+                    hovertemplate="%{x|%Y-%m-%d}<br>Price: %{y:,.2f}<extra></extra>"
+                )
             )
+
             fig_line.update_layout(
-                hovermode="x unified", xaxis_title=t["date"], yaxis_title="Price"
+                title=dict(
+                    text=f"<b>{selected_label} - {t['price_trend']}</b>",
+                    font=dict(size=16, color="#1e293b", family="sans-serif")
+                ),
+                plot_bgcolor="#FFFFFF",
+                paper_bgcolor="#FFFFFF",
+                hovermode="x unified",
+                xaxis=dict(
+                    title=dict(text=t["date"], font=dict(color="#64748b", size=12)),
+                    showgrid=False,
+                    showline=False,
+                    zeroline=False,
+                    tickfont=dict(color="#64748b", size=11),
+                ),
+                yaxis=dict(
+                    title=dict(text="Price", font=dict(color="#64748b", size=12)),
+                    showgrid=True,
+                    gridcolor="#e2e8f0",
+                    gridwidth=1,
+                    showline=False,
+                    zeroline=False,
+                    tickformat="~s",  # 20k, 40k, 100k formatı
+                    tickfont=dict(color="#64748b", size=11),
+                ),
+                margin=dict(l=40, r=20, t=50, b=40),
             )
             st.plotly_chart(fig_line, use_container_width=True)
 
@@ -240,6 +285,10 @@ if app_mode == t["market_mode"]:
             fig_candle.update_layout(
                 title=f"{selected_label} - {t['candle_title']}",
                 xaxis_rangeslider_visible=False,
+                plot_bgcolor="#FFFFFF",
+                paper_bgcolor="#FFFFFF",
+                yaxis=dict(showgrid=True, gridcolor="#e2e8f0"),
+                xaxis=dict(showgrid=False)
             )
             st.plotly_chart(fig_candle, use_container_width=True)
 
@@ -283,7 +332,6 @@ else:
         id_col = "portid" if "portid" in df_pw.columns else "portname"
         name_col = "portname" if "portname" in df_pw.columns else id_col
 
-        # Seçilen boğazı bul
         mask = df_pw[id_col].astype(str).str.lower().apply(lambda x: any(pid in x for pid in selected_pid_list)) | \
                df_pw[name_col].astype(str).str.lower().apply(lambda x: any(pid in x for pid in selected_pid_list))
         
@@ -307,7 +355,6 @@ else:
             genel_kargo = to_int(row.get("vessel_count_general_cargo", 0))
             roro = to_int(row.get("vessel_count_RoRo", 0))
 
-            # Üst Metrik Kartları
             m1, m2, m3, m4 = st.columns(4)
             m1.metric(t["total_transit"], f"{toplam:,}")
             m2.metric(t["tanker"], f"{tanker:,}")
@@ -318,7 +365,6 @@ else:
                 t["tab_line_breakdown"], t["tab_compare_line"], t["tab_industries"], t["tab_raw"]
             ])
 
-            # TAB 1: Seçilen Boğazın Gemi Türleri Dağılımı (Klasik Çizgi Grafik)
             with tab_line_breakdown:
                 category_data = pd.DataFrame({
                     t["type"]: [t["tanker"], t["container"], t["dry_bulk"], t["general_cargo"], t["roro"]],
@@ -345,7 +391,6 @@ else:
                 )
                 st.plotly_chart(fig_line, use_container_width=True)
 
-            # TAB 2: Süveyş, Hürmüz ve Ümit Burnu Karşılaştırmalı Çizgi Grafiği
             with tab_compare_line:
                 target_3_pids = ["chokepoint1", "chokepoint6", "chokepoint7"]
                 df_3 = df_pw[df_pw[id_col].isin(target_3_pids)].copy()
@@ -389,7 +434,6 @@ else:
                 )
                 st.plotly_chart(fig_multi_line, use_container_width=True)
 
-            # TAB 3: Taşınan Sektörler & Kritik Emtialar
             with tab_industries:
                 st.subheader(f"⚓ {secilen_bogaz} - {t['tab_industries']}")
                 ind1 = row.get("industry_top1", "-")
@@ -401,7 +445,6 @@ else:
                 col_i2.info(f"🥈 **2. Sektör / Commodity:**\n\n### {ind2}")
                 col_i3.info(f"🥉 **3. Sektör / Commodity:**\n\n### {ind3}")
 
-            # TAB 4: Ham Veri (Yalnızca 3 Boğaz)
             with tab_raw:
                 df_filtered_3 = df_pw[df_pw[id_col].isin(["chokepoint1", "chokepoint6", "chokepoint7"])]
                 st.dataframe(df_filtered_3, use_container_width=True)
