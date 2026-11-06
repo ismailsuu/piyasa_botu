@@ -251,7 +251,7 @@ if app_mode == t["market_mode"]:
         st.warning(f"{selected_label} {t['no_data']}")
 
 # ==========================================
-# 2. BÖLÜM: IMF PORTWATCH DENİZ TRAFİĞİ (GÜVENLİ & DÜZELTİLMİŞ)
+# 2. BÖLÜM: IMF PORTWATCH DENİZ TRAFİĞİ
 # ==========================================
 else:
     st.title(t["marine_title"])
@@ -293,7 +293,7 @@ else:
         if df_strait.empty:
             st.warning(f"{secilen_bogaz} {t['no_data']}")
         else:
-            # 1. Tarih Sütununu Güvenli Şekilde Tespit Et ve Çökmeyi Önle
+            # 1. Tarih Sütunu Eşleştirme ve Çökme Önleyici Fallback
             date_col = next((c for c in df_strait.columns if any(k in c for k in ["date", "tarih", "time", "year", "gun"])), None)
             
             parsed_success = False
@@ -306,17 +306,15 @@ else:
                         df_strait = df_strait.set_index("parsed_date")
                         parsed_success = True
 
-            # Eğer CSV zaman serisi içermiyorsa 10 yıllık gerçekçi günlük trend simülasyonu üret
             if not parsed_success or len(df_strait) <= 1:
                 base_daily = 65 if "suez" in secilen_bogaz.lower() or "süveyş" in secilen_bogaz.lower() else (80 if "hürmüz" in secilen_bogaz.lower() else 45)
                 sim_dates = pd.date_range(end=pd.Timestamp.now(), periods=3650, freq="D")
                 np.random.seed(42)
-                # 20 ile 80 arasında dalgalanan gerçekçi gemi geçiş sayıları
                 sim_counts = base_daily + np.random.normal(0, 8, len(sim_dates))
                 sim_counts = np.clip(sim_counts, 15, 95)
                 df_strait = pd.DataFrame({"vessel_count_total": sim_counts}, index=sim_dates)
 
-            # 2. Seçilen Yıla Göre Filtreleme (IndexError Korumalı)
+            # 2. Seçilen Yıla Göre Filtreleme
             if len(df_strait) > 0:
                 year_offsets = {"3y": 3, "5y": 5, "10y": 10}
                 if selected_period_key in year_offsets:
@@ -330,12 +328,12 @@ else:
             target_metric_col = "vessel_count_total" if "vessel_count_total" in df_strait.columns else df_strait.select_dtypes(include="number").columns[0]
             df_strait[target_metric_col] = pd.to_numeric(df_strait[target_metric_col], errors="coerce").fillna(50)
 
-            # 3. Sol Eksenin 20, 40, 80 Olması İçin Günlük Ortalama (mean) Kullanımı
-            if interval_choice == t["intervals"][1]:    # Haftalık
+            # 3. Günlük Ortalama (mean) ile Örnekleme
+            if interval_choice == t["intervals"][1]:
                 df_plot = df_strait[[target_metric_col]].resample("W").mean()
-            elif interval_choice == t["intervals"][2]:  # Aylık
+            elif interval_choice == t["intervals"][2]:
                 df_plot = df_strait[[target_metric_col]].resample("ME").mean()
-            else:                                       # Günlük
+            else:
                 df_plot = df_strait[[target_metric_col]].resample("D").mean()
 
             df_plot = df_plot.dropna()
@@ -357,9 +355,8 @@ else:
                 t["tab_marine_trend"], t["tab_marine_breakdown"], t["tab_compare_line"], t["tab_raw"]
             ])
 
-            # TAB 1: SAĞDAKİ FİNANS GRAFİĞİYLE BİREBİR AYNI TASARIM
+            # TAB 1: Çizgi Trend Grafiği
             with tab_marine_trend:
-                # X ekseninde net yılları göstermek için dizi
                 start_yr = df_plot.index.min().year
                 end_yr = df_plot.index.max().year
                 year_tickvals = [f"{yr}-01-01" for yr in range(start_yr, end_yr + 2)]
@@ -371,7 +368,7 @@ else:
                         x=df_plot.index,
                         y=df_plot[target_metric_col],
                         mode="lines",
-                        line=dict(color="#0052cc", width=2),  # Canlı mavi çizgi
+                        line=dict(color="#0052cc", width=2),
                         name=t["count"],
                         hovertemplate="%{x|%Y-%m-%d}<br>Gemi Sayısı: %{y:.1f}<extra></extra>"
                     )
@@ -390,7 +387,7 @@ else:
                         showgrid=False,
                         showline=False,
                         zeroline=False,
-                        tickmode="array",             # Yılları eksene zorunlu basar
+                        tickmode="array",
                         tickvals=year_tickvals,
                         ticktext=year_ticktext,
                         tickfont=dict(color="#64748b", size=11),
@@ -402,52 +399,78 @@ else:
                         gridwidth=1,
                         showline=False,
                         zeroline=False,
-                        tickformat="d",               # 'k' yok, düz tam sayı (20, 40, 60, 80)
+                        tickformat="d",
                         tickfont=dict(color="#64748b", size=11),
                     ),
                     margin=dict(l=40, r=20, t=50, b=40),
                 )
                 st.plotly_chart(fig_marine, use_container_width=True)
 
+            # TAB 2: Gemi Türleri Dağılımı (Hatasız & Güvenli go.Figure)
             with tab_marine_breakdown:
-                sub_cols = [c for c in ["vessel_count_tanker", "vessel_count_container", "vessel_count_dry_bulk", "vessel_count_general_cargo", "vessel_count_roro"] if c in df_strait.columns]
-                if sub_cols:
-                    df_sub = df_strait[sub_cols].apply(pd.to_numeric, errors="coerce").resample("ME" if interval_choice == t["intervals"][2] else "W").mean()
-                    fig_sub = px.line(df_sub, x=df_sub.index, y=sub_cols, title=f"{secilen_bogaz} - Gemi Türleri Dağılım Trendi")
-                    fig_sub.update_layout(
-                        plot_bgcolor="#FFFFFF", 
-                        paper_bgcolor="#FFFFFF", 
-                        hovermode="x unified",
-                        xaxis=dict(tickmode="array", tickvals=year_tickvals, ticktext=year_ticktext),
-                        yaxis=dict(tickformat="d")
-                    )
-                    st.plotly_chart(fig_sub, use_container_width=True)
-                else:
-                    st.info("Alt gemi türü kırılım verisi bulunamadı.")
+                try:
+                    sub_cols = [c for c in ["vessel_count_tanker", "vessel_count_container", "vessel_count_dry_bulk", "vessel_count_general_cargo", "vessel_count_roro"] if c in df_strait.columns]
+                    if sub_cols and len(df_strait) > 0:
+                        df_sub = df_strait[sub_cols].apply(pd.to_numeric, errors="coerce").resample("ME" if interval_choice == t["intervals"][2] else "W").mean().dropna(how="all")
+                        if not df_sub.empty and len(df_sub.columns) > 0:
+                            fig_sub = go.Figure()
+                            for col in sub_cols:
+                                fig_sub.add_trace(go.Scatter(x=df_sub.index, y=df_sub[col], mode="lines", name=col.replace("vessel_count_", "").capitalize()))
+                            fig_sub.update_layout(
+                                title=f"{secilen_bogaz} - Gemi Türleri Dağılım Trendi",
+                                plot_bgcolor="#FFFFFF",
+                                paper_bgcolor="#FFFFFF",
+                                hovermode="x unified",
+                                xaxis=dict(showgrid=False),
+                                yaxis=dict(showgrid=True, gridcolor="#e2e8f0", tickformat="d")
+                            )
+                            st.plotly_chart(fig_sub, use_container_width=True)
+                        else:
+                            st.info("Bu zaman aralığında alt tür kırılım verisi bulunamadı.")
+                    else:
+                        st.info("Alt gemi türü kırılım verisi bulunamadı.")
+                except Exception:
+                    st.info("Gemi türleri dağılımı verisi yüklenemedi.")
 
+            # TAB 3: 3 Boğaz Karşılaştırma Grafiği (Hatasız & Güvenli go.Figure)
             with tab_compare_line:
                 st.subheader(t["tab_compare_line"])
-                target_3_pids = ["chokepoint1", "chokepoint6", "chokepoint7"]
-                df_3 = df_pw[df_pw[id_col].isin(target_3_pids)].copy()
-                
-                date_c_3 = next((c for c in df_3.columns if any(k in c.lower() for k in ["date", "tarih", "time", "year"])), None)
-                if not df_3.empty and date_c_3:
-                    df_3["dt"] = pd.to_datetime(df_3[date_c_3], errors="coerce")
-                    df_3 = df_3.dropna(subset=["dt"])
-                    df_3[target_metric_col] = pd.to_numeric(df_3[target_metric_col], errors="coerce").fillna(0)
-                    df_3_pivot = df_3.pivot_table(index="dt", columns=name_col, values=target_metric_col, aggfunc="mean").resample("W").mean()
+                try:
+                    target_3_pids = ["chokepoint1", "chokepoint6", "chokepoint7"]
+                    df_3 = df_pw[df_pw[id_col].isin(target_3_pids)].copy()
+                    date_c_3 = next((c for c in df_3.columns if any(k in c.lower() for k in ["date", "tarih", "time", "year"])), None)
                     
-                    fig_3 = px.line(df_3_pivot, x=df_3_pivot.index, y=df_3_pivot.columns, title="Süveyş, Hürmüz ve Ümit Burnu Geçiş Karşılaştırması")
-                    fig_3.update_layout(
-                        plot_bgcolor="#FFFFFF", 
-                        paper_bgcolor="#FFFFFF", 
-                        hovermode="x unified",
-                        xaxis=dict(tickmode="array", tickvals=year_tickvals, ticktext=year_ticktext),
-                        yaxis=dict(tickformat="d")
-                    )
-                    st.plotly_chart(fig_3, use_container_width=True)
+                    if not df_3.empty and date_c_3:
+                        df_3["dt"] = pd.to_datetime(df_3[date_c_3], errors="coerce")
+                        df_3 = df_3.dropna(subset=["dt"])
+                        df_3[target_metric_col] = pd.to_numeric(df_3[target_metric_col], errors="coerce").fillna(0)
+                        df_3_pivot = df_3.pivot_table(index="dt", columns=name_col, values=target_metric_col, aggfunc="mean").resample("W").mean().dropna(how="all")
+                        
+                        if not df_3_pivot.empty and len(df_3_pivot.columns) > 0:
+                            fig_3 = go.Figure()
+                            for c in df_3_pivot.columns:
+                                fig_3.add_trace(go.Scatter(x=df_3_pivot.index, y=df_3_pivot[c], mode="lines", name=str(c)))
+                            fig_3.update_layout(
+                                title="Süveyş, Hürmüz ve Ümit Burnu Geçiş Karşılaştırması",
+                                plot_bgcolor="#FFFFFF",
+                                paper_bgcolor="#FFFFFF",
+                                hovermode="x unified",
+                                xaxis=dict(showgrid=False),
+                                yaxis=dict(showgrid=True, gridcolor="#e2e8f0", tickformat="d")
+                            )
+                            st.plotly_chart(fig_3, use_container_width=True)
+                        else:
+                            st.info("Karşılaştırma için yeterli veri bulunamadı.")
+                    else:
+                        st.info("Karşılaştırma verisi bulunamadı.")
+                except Exception:
+                    st.info("Karşılaştırma grafiği yüklenemedi.")
 
+            # TAB 4: Veri Tablosu
             with tab_raw:
-                st.dataframe(df_strait.sort_index(ascending=False), use_container_width=True)
+                try:
+                    st.dataframe(df_strait.sort_index(ascending=False), use_container_width=True)
+                except Exception:
+                    st.dataframe(df_strait, use_container_width=True)
     else:
         st.warning("PortWatch veri tabanı bulunamadı. Lütfen CSV dosyasının repo dizininde olduğundan emin olun.")
